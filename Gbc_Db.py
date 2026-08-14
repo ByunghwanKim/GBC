@@ -59,7 +59,7 @@ def get_gemini_model():
     # 2.0-flash 우선 적용, 문제 발생 시 1.5-flash로 자동 대체
     try:
         return genai.GenerativeModel(
-            model_name='gemini-2.0-flash',
+            model_name='gemini-pro',
             generation_config={"response_mime_type": "application/json", "temperature": 0.1}
         )
     except Exception:
