@@ -11,6 +11,17 @@ from github.GithubException import UnknownObjectException
 # 1. 페이지 설정
 st.set_page_config(page_title="GBC 연구 논문 DB 관리 시스템", page_icon="📚", layout="wide")
 
+# CSS: Manage app 버튼 및 기본 메뉴 숨기기 (깔끔한 화면 유지)
+hide_streamlit_style = """
+    <style>
+    [data-testid="stStatusWidget"] {visibility: hidden;}
+    .stAppDeployButton {display: none;}
+    #MainMenu {visibility: hidden;}
+    footer {visibility: hidden;}
+    </style>
+"""
+st.markdown(hide_streamlit_style, unsafe_allow_html=True)
+
 try:
     GEMINI_API_KEY = st.secrets["GEMINI_API_KEY"]
     GITHUB_TOKEN = st.secrets["GITHUB_TOKEN"]
@@ -31,7 +42,7 @@ model = genai.GenerativeModel(
 repo = Github(GITHUB_TOKEN).get_repo(GITHUB_REPO)
 EXCEL_FILE_PATH = "database/GBC_연구논문_DB.xlsx"
 
-# 14개 정예 표준 컬럼 정의
+# 14개 표준 컬럼 정의
 DB_COLUMNS = [
     'No.', '저자', '발행 연도', '논문/도서 제목', 
     '학술지명/출처', '핵심 이론', '연구 모형', '가설 정리', 
@@ -75,6 +86,34 @@ def save_master_excel(df, sha):
     else:
         repo.create_file(EXCEL_FILE_PATH, "Create GBC 연구논문 DB", content)
 
+# 팝업 모달창 (설문문항 및 상세정보 전용 뷰어)
+@st.dialog("📋 논문 상세 정보 및 설문문항", width="large")
+def show_detail_dialog(row):
+    st.subheader(f"📖 {row.get('논문/도서 제목', '-')}")
+    
+    col1, col2, col3 = st.columns(3)
+    col1.markdown(f"**저자:** {row.get('저자', '-')}")
+    col2.markdown(f"**발행 연도:** {row.get('발행 연도', '-')}")
+    col3.markdown(f"**학술지명:** {row.get('학술지명/출처', '-')}")
+    
+    st.divider()
+    
+    c_a, c_b = st.columns(2)
+    with c_a:
+        st.markdown(f"**💡 핵심 이론:**\n\n{row.get('핵심 이론', '-')}")
+        st.markdown(f"**📊 연구 모형:**\n\n{row.get('연구 모형', '-')}")
+    with c_b:
+        st.markdown(f"**📌 가설 체계:**\n\n{row.get('가설 정리', '-')}")
+        st.markdown(f"**🎯 주요 발견:**\n\n{row.get('주요 발견(Key Findings)', '-')}")
+
+    st.divider()
+    st.markdown("### 📝 측정 척도 및 설문 문항 원문")
+    survey_text = str(row.get('설문문항', '-'))
+    if survey_text and survey_text != "-":
+        st.text_area("설문문항 상세 (복사 가능)", value=survey_text, height=260)
+    else:
+        st.info("등록된 설문문항 데이터가 없습니다.")
+
 # 2. 사이드바 관리자 인증
 st.sidebar.title("🔐 관리자 모드")
 input_pw = st.sidebar.text_input("관리자 비밀번호", type="password", placeholder="비밀번호 입력")
@@ -88,16 +127,17 @@ elif input_pw:
 # 3. 메인 화면 구성
 st.title("📚 GBC 연구 논문 DB 관리 시스템")
 
-# 탭 구성: 일반 사용자(검색, 논문 업로드) / 관리자(인증 시 관리 탭 추가)
 tab_names = ["🔍 연구 논문 DB 검색", "🚀 논문 파일 업로드"]
 if is_admin:
     tab_names.append("⚙️ 관리자 전용 관리 (DB/다운로드)")
 
 tabs = st.tabs(tab_names)
 
-# [탭 1: 일반 사용자 공개] 연구 논문 DB 검색
+# [탭 1] 연구 논문 DB 검색 & 클릭 시 팝업 뷰어
 with tabs[0]:
     st.subheader("🔍 연구 논문 DB 다차원 검색")
+    st.caption("💡 **아래 목록에서 행(Row)을 클릭하면 별도의 창에서 '설문문항 원문'과 상세 연구정보를 시원하게 볼 수 있습니다.**")
+    
     master_df, _ = load_master_excel()
     
     if master_df.empty:
@@ -119,10 +159,24 @@ with tabs[0]:
         if theory_filter != "전체 보기":
             filtered_df = filtered_df[filtered_df["핵심 이론"].str.contains(theory_filter, na=False)]
 
-        st.write(f"조회 결과: 총 **{len(filtered_df)}건**")
-        st.dataframe(filtered_df, use_container_width=True, hide_index=True)
+        st.write(f"조회 결과: 총 **{len(filtered_df)}건** (행을 클릭해 상세 설문문항을 확인하세요)")
 
-# [탭 2: 일반 사용자 공개] 논문 파일 업로드 및 분석 누적
+        # 단일 행 선택 모드 활성화 (클릭 시 팝업 트리거)
+        event = st.dataframe(
+            filtered_df,
+            use_container_width=True,
+            hide_index=True,
+            on_select="rerun",
+            selection_mode="single-row"
+        )
+        
+        # 행 선택 감지 시 팝업 다이얼로그 호출
+        if event.selection.rows:
+            selected_idx = event.selection.rows[0]
+            selected_row = filtered_df.iloc[selected_idx]
+            show_detail_dialog(selected_row)
+
+# [탭 2] 논문 파일 업로드 및 AI 분석
 with tabs[1]:
     st.subheader("논문 파일을 업로드 하세요.")
     uploaded_files = st.file_uploader(
@@ -254,7 +308,7 @@ with tabs[1]:
         else:
             st.warning("업로드할 PDF 또는 엑셀 파일을 선택해주세요.")
 
-# [탭 3: 관리자 전용] 비밀번호 인증 시에만 탭 노출
+# [탭 3] 관리자 전용 관리
 if is_admin:
     with tabs[2]:
         st.subheader("⚙️ 관리자 전용 마스터 DB 관리")
@@ -265,7 +319,6 @@ if is_admin:
         
         col_a, col_b = st.columns(2)
         
-        # 1. 마스터 DB 전체 다운로드
         with col_a:
             st.markdown("### 📥 마스터 엑셀 백업 다운로드")
             buffer = io.BytesIO()
@@ -279,14 +332,12 @@ if is_admin:
                 type="primary"
             )
             
-        # 2. 특정 논문 삭제 관리
         with col_b:
             st.markdown("### 🗑️ 특정 논문 데이터 삭제")
             if not master_df.empty:
                 del_target_no = st.selectbox("삭제할 No. 선택", master_df['No.'].tolist())
                 if st.button("선택한 항목 영구 삭제", type="secondary"):
                     new_df = master_df[master_df['No.'] != del_target_no].reset_index(drop=True)
-                    # 번호 재부여
                     new_df['No.'] = range(1, len(new_df) + 1)
                     save_master_excel(new_df, sha)
                     st.success(f"No. {del_target_no} 데이터가 삭제되었습니다. 페이지를 새로고침하세요.")
