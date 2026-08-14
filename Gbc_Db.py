@@ -129,7 +129,8 @@ if st.button("검색 및 문항 추출 실행", type="primary"):
                     
                     params["year"] = f"{start_year}-"
 
-                res = requests.get(url, params=params)
+                headers = {"x-api-key": MY_API_KEY}
+                res = requests.get(url, params=params, headers=headers)
                 
                 if res.status_code == 429:
                     status.update(label="요청 한도 초과 (잠시 후 다시 시도해주세요)", state="error")
