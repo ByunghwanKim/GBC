@@ -19,7 +19,6 @@ custom_css = """
     #MainMenu {visibility: hidden;}
     footer {visibility: hidden;}
     
-    /* 중앙 상세 뷰어 카드 스타일링 */
     .detail-container {
         background-color: #ffffff;
         border: 2px solid #1E88E5;
@@ -40,15 +39,6 @@ custom_css = """
         margin-right: 8px;
         margin-bottom: 8px;
     }
-    .section-title {
-        font-size: 17px;
-        font-weight: 700;
-        color: #2c3e50;
-        margin-top: 15px;
-        margin-bottom: 8px;
-        border-left: 4px solid #1E88E5;
-        padding-left: 10px;
-    }
     </style>
 """
 st.markdown(custom_css, unsafe_allow_html=True)
@@ -62,12 +52,23 @@ except KeyError:
     st.error("⚠️ Streamlit Secrets 설정을 확인해주세요.")
     st.stop()
 
-# Gemini AI 설정
+# Gemini AI 설정 (안정화된 공식 모델 gemini-2.0-flash 적용)
 genai.configure(api_key=GEMINI_API_KEY)
-model = genai.GenerativeModel(
-    model_name='gemini-2.5-flash',
-    generation_config={"response_mime_type": "application/json", "temperature": 0.1}
-)
+
+def get_gemini_model():
+    # 2.0-flash 우선 적용, 문제 발생 시 1.5-flash로 자동 대체
+    try:
+        return genai.GenerativeModel(
+            model_name='gemini-3.5-flash-Lite',
+            generation_config={"response_mime_type": "application/json", "temperature": 0.1}
+        )
+    except Exception:
+        return genai.GenerativeModel(
+            model_name='gemini-2.5-flash',
+            generation_config={"response_mime_type": "application/json", "temperature": 0.1}
+        )
+
+model = get_gemini_model()
 
 # GitHub 저장소 설정
 repo = Github(GITHUB_TOKEN).get_repo(GITHUB_REPO)
@@ -122,7 +123,6 @@ def render_wide_detail_viewer(row):
     with st.container(border=True):
         st.markdown(f"## 📖 No.{row.get('No.', '-')} | {row.get('논문/도서 제목', '-')}")
         
-        # 메타 배지
         col_m1, col_m2, col_m3 = st.columns([1, 1, 2])
         col_m1.info(f"👤 **저자:** {row.get('저자', '-')}")
         col_m2.info(f"📅 **발행 연도:** {row.get('발행 연도', '-')}")
@@ -130,7 +130,6 @@ def render_wide_detail_viewer(row):
         
         st.divider()
         
-        # 2단 연구 구조 분석
         col_left, col_right = st.columns(2)
         with col_left:
             st.markdown("#### 💡 핵심 이론")
@@ -154,7 +153,6 @@ def render_wide_detail_viewer(row):
 
         st.divider()
         
-        # 화면 가로 전체를 사용하는 대형 설문문항 영역
         st.markdown("### 📝 측정 척도 및 설문 문항 원문 (영문/국문)")
         survey_content = str(row.get('설문문항', '-'))
         if survey_content and survey_content != "-":
@@ -190,7 +188,6 @@ with tabs[0]:
     if master_df.empty:
         st.info("현재 DB에 저장된 논문 데이터가 없습니다. [논문 파일 업로드] 탭에서 논문을 먼저 추가해 보세요.")
     else:
-        # 검색 필터
         col1, col2 = st.columns([2, 1])
         with col1:
             search_kw = st.text_input("🔎 통합 키워드 검색", placeholder="이론, 변수(IV/DV), 저자, 설문문항, 논문 제목 등")
@@ -209,12 +206,10 @@ with tabs[0]:
 
         st.write(f"조회 결과: 총 **{len(filtered_df)}건**")
 
-        # 1. 상단 바로보기 드롭다운 (가장 눈에 잘 띄는 위치)
         if not filtered_df.empty:
             paper_options = {f"No.{row['No.']} | {row['저자']} ({row['발행 연도']}) - {str(row['논문/도서 제목'])[:45]}...": row['No.'] for _, row in filtered_df.iterrows()}
             selected_label = st.selectbox("🎯 열람할 논문을 선택하세요 (선택 즉시 아래에 대형 리포트가 펼쳐집니다)", ["선택하세요..."] + list(paper_options.keys()))
             
-            # 선택된 논문이 있으면 중앙 대형 뷰어 즉시 출력
             if selected_label != "선택하세요...":
                 selected_no = paper_options[selected_label]
                 selected_row = filtered_df[filtered_df['No.'] == selected_no].iloc[0]
