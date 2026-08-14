@@ -8,22 +8,22 @@ import datetime
 import google.generativeai as genai
 
 # 1. 페이지 기본 설정
-st.set_page_config(
-    page_title="논문 설문문항 추출기",
-    page_icon="📄",
-    layout="wide"
-)
+st.set_page_config(page_title="논문 설문문항 추출기", page_icon="📄", layout="wide")
 
-# ---------------------------------------------------------
-# [API 키 설정] 
-# Streamlit Cloud의 Advanced settings -> Secrets에 아래 두 키를 등록해야 합니다.
-# ---------------------------------------------------------
+# 2. API 키 설정 (Streamlit Secrets)
 try:
-    OPENAI_API_KEY = st.secrets["OPENAI_API_KEY"] # sk- 로 시작하는 키
-    S2_API_KEY = st.secrets["S2_API_KEY"]         # s2k- 로 시작하는 키
+    GEMINI_API_KEY = st.secrets["GEMINI_API_KEY"]
+    S2_API_KEY = st.secrets["S2_API_KEY"]
 except KeyError:
-    st.error("⚠️ Streamlit Secrets에 API 키가 설정되지 않았습니다. 설정을 확인해주세요.")
+    st.error("⚠️ Streamlit Secrets에 API 키가 설정되지 않았습니다.")
     st.stop()
+
+# 💡 구글 제미나이 AI 초기 설정
+genai.configure(api_key=GEMINI_API_KEY)
+model = genai.GenerativeModel(
+    model_name='gemini-1.5-flash',
+    generation_config={"response_mime_type": "application/json", "temperature": 0.2}
+)
 
 # 커스텀 CSS
 st.markdown("""
@@ -34,21 +34,18 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 st.title("📄 논문 설문문항 자동 추출 시스템")
-st.markdown("입력한 키워드와 관련된 논문을 검색하고, AI가 연구 변수와 측정 문항을 1:1로 매칭하여 표(Excel)로 추출합니다.")
+st.markdown("입력한 키워드와 관련된 논문을 검색하고, **구글 제미나이 AI**가 연구 변수와 측정 문항을 1:1로 매칭하여 표로 추출합니다.")
 
 col1, col2 = st.columns([1, 1])
 with col1:
-    year_filter = st.selectbox(
-        "📅 출판 연도", 
-        ["전체", "최근 5년", "최근 10년", "최근 15년", "최근 20년"]
-    )
+    year_filter = st.selectbox("📅 출판 연도", ["전체", "최근 5년", "최근 10년", "최근 15년", "최근 20년"])
 with col2:
     limit = st.slider("📑 검색할 논문 수", min_value=1, max_value=5, value=3)
 
 query = st.text_input("🔍 검색 키워드 (예: Generative AI advertising)")
 
-# 3. 개별 논문 AI 추출 함수
-def extract_single_paper(paper, client):
+# 3. 개별 논문 구글 제미나이 추출 함수
+def extract_single_paper(paper):
     title = paper.get("title", "")
     abstract = paper.get("abstract", "")
     citation_count = paper.get("citationCount", 0)
@@ -58,7 +55,7 @@ def extract_single_paper(paper, client):
 
     prompt = f"""
     당신은 경영학 및 소비자 행동 연구 방법론 전문가입니다.
-    아래 논문 정보를 바탕으로, 연구 변수(Constructs), 설문 문항(Survey Items), 척도(Scale)를 JSON 형식으로 추출해주세요.
+    아래 논문 정보를 바탕으로, 연구 변수(Constructs), 설문 문항(Survey Items), 척도(Scale)를 정확히 찾아내어 JSON 형식으로 추출해주세요.
 
     [논문 제목]: {title}
     [초록]: {abstract}
@@ -77,20 +74,13 @@ def extract_single_paper(paper, client):
     """
     
     try:
-        response = client.chat.completions.create(
-            model="gpt-4o-mini",
-            messages=[
-                {"role": "system", "content": "You output strictly JSON."},
-                {"role": "user", "content": prompt}
-            ],
-            response_format={"type": "json_object"},
-            temperature=0.2
-        )
+        # 제미나이 모델에 프롬프트 전송
+        response = model.generate_content(prompt)
         
         try:
-            result = json.loads(response.choices[0].message.content)
+            result = json.loads(response.text)
         except json.JSONDecodeError:
-            return {"status": "error", "title": title, "msg": "AI 응답(JSON) 형식이 올바르지 않습니다."}
+            return {"status": "error", "title": title, "msg": "AI 응답(JSON) 형식이 깨졌습니다."}
 
         items = result.get("items", [])
         for item in items:
@@ -100,7 +90,7 @@ def extract_single_paper(paper, client):
         return {"status": "success", "items": items}
 
     except Exception as e:
-        return {"status": "error", "title": title, "msg": f"오류: {str(e)}"}
+        return {"status": "error", "title": title, "msg": f"AI 분석 오류: {str(e)}"}
 
 
 # 4. 검색 및 추출 실행 로직
@@ -112,30 +102,19 @@ if st.button("검색 및 문항 추출 실행", type="primary"):
             try:
                 st.write("1. Semantic Scholar 학술 DB에서 논문 검색 중...")
                 
-                # API 호출 파라미터 세팅
                 url = "https://api.semanticscholar.org/graph/v1/paper/search"
-                params = {
-                    "query": query,
-                    "limit": limit,
-                    "fields": "title,abstract,citationCount"
-                }
+                params = {"query": query, "limit": limit, "fields": "title,abstract,citationCount"}
                 
                 if year_filter != "전체":
                     current_year = datetime.datetime.now().year
-                    if year_filter == "최근 5년":
-                        params["year"] = f"{current_year - 5}-"
-                    elif year_filter == "최근 10년":
-                        params["year"] = f"{current_year - 10}-"
-                    elif year_filter == "최근 15년":
-                        params["year"] = f"{current_year - 15}-"
-                    elif year_filter == "최근 20년":
-                        params["year"] = f"{current_year - 20}-"
+                    if year_filter == "최근 5년": params["year"] = f"{current_year - 5}-"
+                    elif year_filter == "최근 10년": params["year"] = f"{current_year - 10}-"
+                    elif year_filter == "최근 15년": params["year"] = f"{current_year - 15}-"
+                    elif year_filter == "최근 20년": params["year"] = f"{current_year - 20}-"
 
-                # 💡 가이드에 명시된 부분: x-api-key 헤더에 S2 키 탑재
                 headers = {"x-api-key": S2_API_KEY}
                 res = requests.get(url, params=params, headers=headers)
                 
-                # 에러 디버깅 로직 추가
                 if res.status_code == 429:
                     status.update(label="요청 한도 초과 (잠시 후 다시 시도해주세요)", state="error")
                     st.stop()
@@ -145,20 +124,18 @@ if st.button("검색 및 문항 추출 실행", type="primary"):
                     st.stop()
                 elif res.json().get("total", 0) == 0:
                     status.update(label="조건에 맞는 논문을 찾을 수 없습니다.", state="error")
-                    st.info("💡 팁: 검색어를 '영문'으로 짧게(예: Generative AI advertising) 입력하시고, 출판 연도를 '전체'로 변경해 보세요.")
+                    st.info("💡 팁: 검색어를 '영문'으로 짧게 입력하시고, 출판 연도를 '전체'로 변경해 보세요.")
                     st.stop()
 
                 papers = res.json().get("data", [])
-                st.write(f"✅ {len(papers)}개의 논문 발견! AI 분석을 시작합니다 (병렬 처리)...")
+                st.write(f"✅ {len(papers)}개의 논문 발견! 제미나이 AI 분석을 시작합니다...")
                 
-                # 💡 OpenAI 분석용 클라이언트에는 OpenAI 전용 키 탑재
-                client = OpenAI(api_key=OPENAI_API_KEY)
                 all_extracted_items = []
                 error_logs = []
 
-                # ThreadPoolExecutor 병렬 처리
+                # 💡 남아있던 OpenAI 관련 코드 완전 제거 후 제미나이 병렬 처리
                 with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
-                    futures = [executor.submit(extract_single_paper, paper, client) for paper in papers]
+                    futures = [executor.submit(extract_single_paper, paper) for paper in papers]
                     
                     for future in concurrent.futures.as_completed(futures):
                         res_data = future.result()
@@ -205,7 +182,7 @@ if st.button("검색 및 문항 추출 실행", type="primary"):
         st.download_button(
             label="📥 엑셀(Excel) 파일로 다운로드",
             data=buffer.getvalue(),
-            file_name=f"survey_items.xlsx",
+            file_name=f"survey_items_gemini.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             type="primary"
         )
