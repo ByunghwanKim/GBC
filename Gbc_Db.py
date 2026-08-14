@@ -5,7 +5,7 @@ import json
 import concurrent.futures
 import io
 import datetime
-from openai import OpenAI
+import google.generativeai as genai
 
 # 1. 페이지 기본 설정
 st.set_page_config(
