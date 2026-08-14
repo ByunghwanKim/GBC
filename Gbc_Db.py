@@ -30,12 +30,12 @@ model = genai.GenerativeModel(
 repo = Github(GITHUB_TOKEN).get_repo(GITHUB_REPO)
 EXCEL_FILE_PATH = "database/GBC_연구논문_DB.xlsx"
 
-# '연구 방법론', '설문문항'이 제외된 최종 정예 13개 컬럼 정의
+# 14개 정예 표준 컬럼 정의
 DB_COLUMNS = [
     'No.', '저자', '발행 연도', '논문/도서 제목', 
     '학술지명/출처', '핵심 이론', '연구 모형', '가설 정리', 
     '독립변수(IV)', '종속변수(DV)', '매개변수(Mediator)', 
-    '조절변수(Moderator)', '주요 발견(Key Findings)'
+    '조절변수(Moderator)', '주요 발견(Key Findings)', '설문문항'
 ]
 
 # GitHub에서 마스터 엑셀 파일 불러오기
@@ -45,10 +45,14 @@ def load_master_excel():
         decoded = base64.b64decode(file_content.content)
         df = pd.read_excel(io.BytesIO(decoded))
         
-        # 불필요 컬럼들 정리
+        # 기존 파일에 '메모' 컬럼이 있으면 '설문문항'으로 흡수
+        if '메모' in df.columns and '설문문항' not in df.columns:
+            df = df.rename(columns={'메모': '설문문항'})
+            
+        # 불필요 컬럼 정리
         drop_targets = [
             '상태', '권/호', '실무적 시사점', '국내/해외', 
-            '연구 주제/키워드', '메모', '연구 방법론', '설문문항'
+            '연구 주제/키워드', '메모', '연구 방법론'
         ]
         df = df.drop(columns=[col for col in drop_targets if col in df.columns], errors='ignore')
         
@@ -108,10 +112,14 @@ with tab1:
                         try:
                             excel_df = pd.read_excel(file)
                             
+                            # '메모' 컬럼이 있으면 '설문문항'으로 변경
+                            if '메모' in excel_df.columns and '설문문항' not in excel_df.columns:
+                                excel_df = excel_df.rename(columns={'메모': '설문문항'})
+                                
                             # 불필요 컬럼 제거
                             drop_targets = [
                                 '상태', '권/호', '실무적 시사점', '국내/해외', 
-                                '연구 주제/키워드', '메모', '연구 방법론', '설문문항'
+                                '연구 주제/키워드', '메모', '연구 방법론'
                             ]
                             excel_df = excel_df.drop(columns=[col for col in drop_targets if col in excel_df.columns], errors='ignore')
                             
@@ -133,7 +141,7 @@ with tab1:
                         except Exception as e:
                             st.error(f"'{file.name}' 엑셀 읽기 오류: {str(e)}")
 
-                    # 2. PDF 파일인 경우 -> Gemini AI 분석 (설문문항 제외)
+                    # 2. PDF 파일인 경우 -> Gemini AI 분석 (설문문항 포함)
                     elif file_ext == 'pdf':
                         st.write(f"⏳ [{idx+1}/{len(uploaded_files)}] '{file.name}' PDF AI 심층 분석 중...")
                         try:
@@ -147,10 +155,11 @@ with tab1:
                             st.warning(f"'{file.name}'에서 텍스트를 읽지 못했습니다. (스캔 이미지 PDF일 수 있음)")
                             continue
 
-                        # 설문문항 및 연구방법론 제외 프롬프트
+                        # 설문문항 추출이 강화된 프롬프트
                         prompt = f"""
                         당신은 경영학 및 소비자 행동 연구 방법론 최고 전문가입니다.
-                        아래 제공된 연구 논문 텍스트를 정밀 분석하여 다음 11개 항목을 JSON 형식으로 추출해주세요.
+                        아래 제공된 연구 논문 텍스트를 정밀 분석하여 다음 12개 항목을 JSON 형식으로 추출해주세요.
+                        특히, 연구 방법론(Methodology) 및 부록(Appendix)을 꼼꼼히 살펴 변수별 측정 문항과 척도를 'survey_items'에 상세히 기재하세요.
                         
                         추출 형식(JSON):
                         {{
@@ -165,7 +174,8 @@ with tab1:
                             "dv": "종속변수(DV)",
                             "mediator": "매개변수(Mediator, 없으면 '-')",
                             "moderator": "조절변수(Moderator, 없으면 '-')",
-                            "findings": "주요 발견(Key Findings)"
+                            "findings": "주요 발견(Key Findings)",
+                            "survey_items": "변수별 측정 척도 유형 및 실제 측정에 사용된 설문 문항 원문(영문/국문 번역 병기)을 줄바꿈하여 구체적으로 작성"
                         }}
 
                         [논문 원문 텍스트]:
@@ -190,10 +200,11 @@ with tab1:
                                 '종속변수(DV)': res_json.get('dv', '-'),
                                 '매개변수(Mediator)': res_json.get('mediator', '-'),
                                 '조절변수(Moderator)': res_json.get('moderator', '-'),
-                                '주요 발견(Key Findings)': res_json.get('findings', '-')
+                                '주요 발견(Key Findings)': res_json.get('findings', '-'),
+                                '설문문항': res_json.get('survey_items', '-')
                             }
                             new_entries.append(entry)
-                            st.write(f"✅ '{file.name}' 분석 완료!")
+                            st.write(f"✅ '{file.name}' 분석 완료 (설문문항 포함)!")
                         except Exception as e:
                             st.error(f"'{file.name}' 분석 중 오류: {str(e)}")
 
@@ -220,7 +231,7 @@ with tab2:
     else:
         col1, col2 = st.columns([2, 1])
         with col1:
-            search_kw = st.text_input("🔎 통합 키워드 검색", placeholder="이론, 변수(IV/DV/매개/조절), 저자, 논문 제목 등")
+            search_kw = st.text_input("🔎 통합 키워드 검색", placeholder="이론, 변수(IV/DV), 저자, 설문문항, 논문 제목 등")
         with col2:
             all_theories = master_df["핵심 이론"].dropna().str.split('\n').explode().str.strip().unique()
             theory_filter = st.selectbox("💡 핵심 이론별 필터", ["전체 보기"] + [t for t in all_theories if t and t != '-'])
@@ -237,14 +248,16 @@ with tab2:
         st.write(f"조회 결과: 총 **{len(filtered_df)}건**")
         st.dataframe(filtered_df, use_container_width=True, hide_index=True)
         
+        # 엑셀 버퍼 생성 로직은 보존하되, 다운로드 버튼만 화면에서 숨김 처리
         buffer = io.BytesIO()
         with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
             filtered_df.to_excel(writer, index=False, sheet_name='Sheet1')
             
-        st.download_button(
-            label="📥 검색 결과 엑셀(Excel) 다운로드",
-            data=buffer.getvalue(),
-            file_name="GBC_연구논문_검색결과.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            type="primary"
-        )
+        # [다운로드 버튼 숨김 처리 - 필요 시 아래 주석을 해제하세요]
+        # st.download_button(
+        #     label="📥 검색 결과 엑셀(Excel) 다운로드",
+        #     data=buffer.getvalue(),
+        #     file_name="GBC_연구논문_검색결과.xlsx",
+        #     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        #     type="primary"
+        # )
