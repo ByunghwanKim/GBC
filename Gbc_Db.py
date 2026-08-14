@@ -8,8 +8,8 @@ from pypdf import PdfReader
 from github import Github
 from github.GithubException import UnknownObjectException
 
-# 1. 페이지 설정
-st.set_page_config(page_title="소비자행동 논문 문항 DB", page_icon="📚", layout="wide")
+# 1. 페이지 설정 및 타이틀 변경
+st.set_page_config(page_title="GBC 연구 논문 DB 관리 시스템", page_icon="📚", layout="wide")
 
 try:
     GEMINI_API_KEY = st.secrets["GEMINI_API_KEY"]
@@ -28,9 +28,9 @@ model = genai.GenerativeModel(
 
 # GitHub 저장소 설정
 repo = Github(GITHUB_TOKEN).get_repo(GITHUB_REPO)
-EXCEL_FILE_PATH = "database/소비자행동_완전DB.xlsx"
+EXCEL_FILE_PATH = "database/GBC_연구논문_DB.xlsx"
 
-# 군더더기를 걷어낸 정예 15개 컬럼 체계 ('메모' -> '설문문항' 변경)
+# 표준 15개 컬럼 정의
 DB_COLUMNS = [
     'No.', '저자', '발행 연도', '논문/도서 제목', 
     '학술지명/출처', '핵심 이론', '연구 모형', '가설 정리', 
@@ -46,15 +46,15 @@ def load_master_excel():
         decoded = base64.b64decode(file_content.content)
         df = pd.read_excel(io.BytesIO(decoded))
         
-        # 이전 '메모' 컬럼이 있으면 '설문문항'으로 이름 변경
+        # '메모' 컬럼이 있으면 '설문문항'으로 보정
         if '메모' in df.columns and '설문문항' not in df.columns:
             df = df.rename(columns={'메모': '설문문항'})
             
-        # 삭제 대상 컬럼 제거
+        # 불필요 컬럼 정리
         drop_targets = ['상태', '권/호', '실무적 시사점', '국내/해외', '연구 주제/키워드', '메모']
         df = df.drop(columns=[col for col in drop_targets if col in df.columns], errors='ignore')
         
-        # 누락된 컬럼 보정
+        # 누락 컬럼 채우기
         for col in DB_COLUMNS:
             if col not in df.columns:
                 df[col] = "-"
@@ -71,21 +71,25 @@ def save_master_excel(df, sha):
     content = buffer.getvalue()
     
     if sha:
-        repo.update_file(EXCEL_FILE_PATH, "Update 소비자행동_완전DB", content, sha)
+        repo.update_file(EXCEL_FILE_PATH, "Update GBC 연구논문 DB", content, sha)
     else:
-        repo.create_file(EXCEL_FILE_PATH, "Create 소비자행동_완전DB", content)
+        repo.create_file(EXCEL_FILE_PATH, "Create GBC 연구논문 DB", content)
 
 # 2. UI 화면 구성
-st.title("📚 소비자행동 연구 논문 DB & 설문문항 관리 시스템")
+st.title("📚 GBC 연구 논문 DB 관리 시스템")
 
-tab1, tab2 = st.tabs(["🚀 논문 분석 및 DB 누적", "🔍 설문문항 및 DB 검색"])
+tab1, tab2 = st.tabs(["🚀 파일 분석 및 DB 누적 (PDF/Excel)", "🔍 연구 논문 DB 검색 및 관리"])
 
-# [탭 1] 논문 분석 및 누적
+# [탭 1] 파일 업로드 및 DB 누적
 with tab1:
-    st.subheader("논문 PDF를 올리면 이론, 모형, 가설, 변수(IV/DV), 세부 설문문항을 추출하여 DB에 누적합니다.")
-    uploaded_files = st.file_uploader("논문 PDF 파일 업로드 (여러 개 선택 가능)", type=['pdf'], accept_multiple_files=True)
+    st.subheader("논문 PDF(AI 자동 추출) 또는 기존 엑셀(DB 일괄 등록) 파일을 업로드하세요.")
+    uploaded_files = st.file_uploader(
+        "PDF 또는 Excel 파일을 선택하세요 (다중 선택 가능)", 
+        type=['pdf', 'xlsx', 'xls'], 
+        accept_multiple_files=True
+    )
     
-    if st.button("논문 심층 분석 및 마스터 DB에 추가", type="primary"):
+    if st.button("파일 처리 및 마스터 DB에 누적 저장", type="primary"):
         if uploaded_files:
             master_df, sha = load_master_excel()
             current_max_no = 0
@@ -96,95 +100,129 @@ with tab1:
 
             new_entries = []
             
-            with st.status("🔍 논문을 정밀 분석하고 있습니다...", expanded=True) as status:
+            with st.status("🔍 데이터를 처리하고 있습니다...", expanded=True) as status:
                 for idx, file in enumerate(uploaded_files):
-                    st.write(f"⏳ [{idx+1}/{len(uploaded_files)}] '{file.name}' 분석 중...")
+                    file_ext = file.name.split('.')[-1].lower()
                     
-                    try:
-                        reader = PdfReader(file)
-                        text = "\n".join([page.extract_text() for page in reader.pages if page.extract_text()])
-                    except Exception as e:
-                        st.error(f"'{file.name}' PDF 텍스트 추출 실패: {str(e)}")
-                        continue
-                        
-                    if not text.strip():
-                        st.warning(f"'{file.name}'에서 텍스트를 읽지 못했습니다. (스캔 이미지 PDF일 수 있음)")
-                        continue
+                    # 1. 엑셀 파일인 경우 -> 직접 읽어서 병합
+                    if file_ext in ['xlsx', 'xls']:
+                        st.write(f"📊 [{idx+1}/{len(uploaded_files)}] '{file.name}' 엑셀 파일 데이터 병합 중...")
+                        try:
+                            excel_df = pd.read_excel(file)
+                            
+                            # 컬럼명 유연 처리
+                            if '메모' in excel_df.columns and '설문문항' not in excel_df.columns:
+                                excel_df = excel_df.rename(columns={'메모': '설문문항'})
+                                
+                            # 불필요 컬럼 제거
+                            drop_targets = ['상태', '권/호', '실무적 시사점', '국내/해외', '연구 주제/키워드', '메모']
+                            excel_df = excel_df.drop(columns=[col for col in drop_targets if col in excel_df.columns], errors='ignore')
+                            
+                            # 필요한 컬럼 채우기
+                            for col in DB_COLUMNS:
+                                if col not in excel_df.columns:
+                                    excel_df[col] = "-"
+                                    
+                            excel_df = excel_df[DB_COLUMNS]
+                            
+                            # No. 재정렬
+                            for _, row in excel_df.iterrows():
+                                current_max_no += 1
+                                row_dict = row.to_dict()
+                                row_dict['No.'] = current_max_no
+                                new_entries.append(row_dict)
+                                
+                            st.write(f"✅ '{file.name}' - {len(excel_df)}건의 데이터 등록 완료!")
+                        except Exception as e:
+                            st.error(f"'{file.name}' 엑셀 읽기 오류: {str(e)}")
 
-                    # 핵심 설문문항 집중 프롬프트
-                    prompt = f"""
-                    당신은 경영학 및 소비자 행동 연구 방법론 최고 전문가입니다.
-                    아래 제공된 연구 논문 텍스트를 정밀 분석하여 다음 12개 항목을 JSON 형식으로 추출해주세요.
-                    
-                    추출 형식(JSON):
-                    {{
-                        "authors": "저자명 (예: 김완석, 유연재)",
-                        "year": "발행 연도 (예: 2023)",
-                        "title": "논문 제목",
-                        "journal": "학술지명 (예: 마케팅연구)",
-                        "theories": "핵심 이론 (예: 조절초점이론, 신호이론 등)",
-                        "model": "연구 모형 요약 (예: [IV] -> [Mediator] -> [DV])",
-                        "hypotheses": "가설 정리 (H1, H2 형식으로 줄바꿈 정리)",
-                        "methodology": "연구 방법론 (예: 2x2 실험설계, 설문조사, 구조방정식 등)",
-                        "iv": "독립변수(IV)",
-                        "dv": "종속변수(DV)",
-                        "mediator": "매개변수(Mediator, 없으면 '-')",
-                        "moderator": "조절변수(Moderator, 없으면 '-')",
-                        "findings": "주요 발견(Key Findings)",
-                        "survey_items": "측정 척도 유형 및 실제 측정에 사용된 설문 문항 원문(영문/국문) 상세 정리"
-                    }}
+                    # 2. PDF 파일인 경우 -> Gemini AI 심층 분석
+                    elif file_ext == 'pdf':
+                        st.write(f"⏳ [{idx+1}/{len(uploaded_files)}] '{file.name}' PDF AI 심층 분석 중...")
+                        try:
+                            reader = PdfReader(file)
+                            text = "\n".join([page.extract_text() for page in reader.pages if page.extract_text()])
+                        except Exception as e:
+                            st.error(f"'{file.name}' PDF 텍스트 추출 실패: {str(e)}")
+                            continue
+                            
+                        if not text.strip():
+                            st.warning(f"'{file.name}'에서 텍스트를 읽지 못했습니다. (스캔 이미지 PDF일 수 있음)")
+                            continue
 
-                    [논문 원문 텍스트]:
-                    {text[:100000]}
-                    """
-                    
-                    try:
-                        response = model.generate_content(prompt)
-                        res_json = json.loads(response.text)
+                        prompt = f"""
+                        당신은 경영학 및 소비자 행동 연구 방법론 최고 전문가입니다.
+                        아래 제공된 연구 논문 텍스트를 정밀 분석하여 다음 12개 항목을 JSON 형식으로 추출해주세요.
                         
-                        current_max_no += 1
-                        entry = {
-                            'No.': current_max_no,
-                            '저자': res_json.get('authors', '-'),
-                            '발행 연도': res_json.get('year', '-'),
-                            '논문/도서 제목': res_json.get('title', file.name),
-                            '학술지명/출처': res_json.get('journal', '-'),
-                            '핵심 이론': res_json.get('theories', '-'),
-                            '연구 모형': res_json.get('model', '-'),
-                            '가설 정리': res_json.get('hypotheses', '-'),
-                            '연구 방법론': res_json.get('methodology', '-'),
-                            '독립변수(IV)': res_json.get('iv', '-'),
-                            '종속변수(DV)': res_json.get('dv', '-'),
-                            '매개변수(Mediator)': res_json.get('mediator', '-'),
-                            '조절변수(Moderator)': res_json.get('moderator', '-'),
-                            '주요 발견(Key Findings)': res_json.get('findings', '-'),
-                            '설문문항': res_json.get('survey_items', '-')
-                        }
-                        new_entries.append(entry)
-                        st.write(f"✅ '{file.name}' 분석 완료!")
-                    except Exception as e:
-                        st.error(f"'{file.name}' 분석 중 오류: {str(e)}")
+                        추출 형식(JSON):
+                        {{
+                            "authors": "저자명 (예: 김완석, 유연재)",
+                            "year": "발행 연도 (예: 2023)",
+                            "title": "논문 제목",
+                            "journal": "학술지명 (예: 마케팅연구)",
+                            "theories": "핵심 이론 (예: 조절초점이론, 신호이론 등)",
+                            "model": "연구 모형 요약 (예: [IV] -> [Mediator] -> [DV])",
+                            "hypotheses": "가설 정리 (H1, H2 형식으로 줄바꿈 정리)",
+                            "methodology": "연구 방법론 (예: 2x2 실험설계, 설문조사, 구조방정식 등)",
+                            "iv": "독립변수(IV)",
+                            "dv": "종속변수(DV)",
+                            "mediator": "매개변수(Mediator, 없으면 '-')",
+                            "moderator": "조절변수(Moderator, 없으면 '-')",
+                            "findings": "주요 발견(Key Findings)",
+                            "survey_items": "측정 척도 유형 및 실제 측정에 사용된 설문 문항 원문(영문/국문) 상세 정리"
+                        }}
+
+                        [논문 원문 텍스트]:
+                        {text[:100000]}
+                        """
+                        
+                        try:
+                            response = model.generate_content(prompt)
+                            res_json = json.loads(response.text)
+                            
+                            current_max_no += 1
+                            entry = {
+                                'No.': current_max_no,
+                                '저자': res_json.get('authors', '-'),
+                                '발행 연도': res_json.get('year', '-'),
+                                '논문/도서 제목': res_json.get('title', file.name),
+                                '학술지명/출처': res_json.get('journal', '-'),
+                                '핵심 이론': res_json.get('theories', '-'),
+                                '연구 모형': res_json.get('model', '-'),
+                                '가설 정리': res_json.get('hypotheses', '-'),
+                                '연구 방법론': res_json.get('methodology', '-'),
+                                '독립변수(IV)': res_json.get('iv', '-'),
+                                '종속변수(DV)': res_json.get('dv', '-'),
+                                '매개변수(Mediator)': res_json.get('mediator', '-'),
+                                '조절변수(Moderator)': res_json.get('moderator', '-'),
+                                '주요 발견(Key Findings)': res_json.get('findings', '-'),
+                                '설문문항': res_json.get('survey_items', '-')
+                            }
+                            new_entries.append(entry)
+                            st.write(f"✅ '{file.name}' 분석 완료!")
+                        except Exception as e:
+                            st.error(f"'{file.name}' 분석 중 오류: {str(e)}")
 
                 if new_entries:
                     new_df = pd.DataFrame(new_entries)
                     updated_df = pd.concat([master_df, new_df], ignore_index=True)
                     save_master_excel(updated_df, sha)
-                    status.update(label="전체 분석 및 DB 누적 저장 완료!", state="complete", expanded=False)
-                    st.success(f"총 {len(new_entries)}편의 논문이 '소비자행동_완전DB'에 깔끔하게 추가되었습니다.")
+                    status.update(label="전체 파일 처리 및 DB 누적 저장 완료!", state="complete", expanded=False)
+                    st.success(f"총 {len(new_entries)}건의 연구 데이터가 'GBC_연구논문_DB'에 완벽하게 누적되었습니다.")
                     st.dataframe(new_df, use_container_width=True)
                 else:
-                    status.update(label="추출된 데이터 없음", state="error")
+                    status.update(label="추출/병합된 데이터 없음", state="error")
         else:
-            st.warning("분석할 PDF 파일을 업로드해주세요.")
+            st.warning("업로드할 PDF 또는 엑셀 파일을 선택해주세요.")
 
 # [탭 2] 완전DB 검색 및 관리
 with tab2:
-    st.subheader("🔍 소비자행동 DB 및 설문문항 검색")
+    st.subheader("🔍 GBC 연구 논문 DB 다차원 검색")
     
     master_df, _ = load_master_excel()
     
     if master_df.empty:
-        st.info("현재 DB에 저장된 논문 데이터가 없습니다. [탭 1]에서 논문을 먼저 추가해 보세요.")
+        st.info("현재 DB에 저장된 논문 데이터가 없습니다. [탭 1]에서 파일(PDF/엑셀)을 먼저 추가해 보세요.")
     else:
         col1, col2 = st.columns([2, 1])
         with col1:
@@ -212,7 +250,7 @@ with tab2:
         st.download_button(
             label="📥 검색 결과 엑셀(Excel) 다운로드",
             data=buffer.getvalue(),
-            file_name="소비자행동_검색결과DB.xlsx",
+            file_name="GBC_연구논문_검색결과.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             type="primary"
         )
