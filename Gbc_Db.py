@@ -11,7 +11,7 @@ from github.GithubException import UnknownObjectException
 # 1. 페이지 설정 (화면 전체 너비 활용)
 st.set_page_config(page_title="GBC 연구 논문 DB 관리 시스템", page_icon="📚", layout="wide")
 
-# CSS: 시인성 극대화 및 깔끔한 화면 구성
+# CSS: 팝업창 최대화 및 기본 UI 가리기
 custom_css = """
     <style>
     [data-testid="stStatusWidget"] {visibility: hidden;}
@@ -19,35 +19,11 @@ custom_css = """
     #MainMenu {visibility: hidden;}
     footer {visibility: hidden;}
     
-    /* 중앙 상세 뷰어 카드 스타일링 */
-    .detail-container {
-        background-color: #ffffff;
-        border: 2px solid #1E88E5;
+    /* 팝업 모달(Dialog)을 최대한 넓게 사용 */
+    div[data-testid="stDialog"] div[role="dialog"] {
+        width: 85vw !important;
+        max-width: 1200px !important;
         border-radius: 12px;
-        padding: 24px;
-        margin-top: 20px;
-        margin-bottom: 25px;
-        box-shadow: 0 4px 16px rgba(0,0,0,0.08);
-    }
-    .badge-tag {
-        display: inline-block;
-        background-color: #E3F2FD;
-        color: #0D47A1;
-        padding: 6px 14px;
-        border-radius: 20px;
-        font-size: 14px;
-        font-weight: 700;
-        margin-right: 8px;
-        margin-bottom: 8px;
-    }
-    .section-title {
-        font-size: 17px;
-        font-weight: 700;
-        color: #2c3e50;
-        margin-top: 15px;
-        margin-bottom: 8px;
-        border-left: 4px solid #1E88E5;
-        padding-left: 10px;
     }
     </style>
 """
@@ -62,12 +38,60 @@ except KeyError:
     st.error("⚠️ Streamlit Secrets 설정을 확인해주세요.")
     st.stop()
 
-# Gemini AI 설정
+# -----------------------------------------------------------------------------
+# 🤖 Gemini AI 설정 (3.7 / 3.5 최우선 탐색 로직)
+# -----------------------------------------------------------------------------
 genai.configure(api_key=GEMINI_API_KEY)
-model = genai.GenerativeModel(
-    model_name='gemini-3.5-flash-Lite',
-    generation_config={"response_mime_type": "application/json", "temperature": 0.1}
-)
+
+@st.cache_resource
+def get_available_gemini_model():
+    """API 키를 통해 사용 가능한 최신 모델을 자동 검색하여 반환"""
+    
+    # 우선순위: 3.7 -> 3.5 -> 2.0 -> 1.5 순으로 가장 강력한 버전을 먼저 시도합니다.
+    preferred_models = [
+        'gemini-3.7-flash',
+        'gemini-3.5-flash',
+        'gemini-3.5-flash-lite',
+        'gemini-2.5-flash',
+        'gemini-2.0-flash',
+        'gemini-1.5-flash-latest',
+        'gemini-1.5-flash'
+    ]
+    try:
+        # 계정에서 사용 가능한 모델 목록 조회
+        available_models = [
+            m.name.replace("models/", "")
+            for m in genai.list_models()
+            if "generateContent" in m.supported_generation_methods
+        ]
+        
+        # 선호 모델 우선순위대로 매칭
+        selected_model = None
+        for pref in preferred_models:
+            if pref in available_models:
+                selected_model = pref
+                break
+                
+        # 선호 모델이 없으면 리스트의 첫 번째 지원 모델 사용
+        if not selected_model and available_models:
+            selected_model = available_models[0]
+            
+        if selected_model:
+            return genai.GenerativeModel(
+                model_name=selected_model,
+                generation_config={"response_mime_type": "application/json", "temperature": 0.1}
+            )
+    except Exception:
+        pass
+    
+    # 위 과정에서 모두 실패 시 사용하는 최후의 하드코딩 대체 모델
+    return genai.GenerativeModel(
+        model_name='gemini-1.5-flash',
+        generation_config={"response_mime_type": "application/json", "temperature": 0.1}
+    )
+
+model = get_available_gemini_model()
+# -----------------------------------------------------------------------------
 
 # GitHub 저장소 설정
 repo = Github(GITHUB_TOKEN).get_repo(GITHUB_REPO)
@@ -117,50 +141,48 @@ def save_master_excel(df, sha):
     else:
         repo.create_file(EXCEL_FILE_PATH, "Create GBC 연구논문 DB", content)
 
-# 화면 중앙 대형 와이드 상세 리포트 렌더링 함수
-def render_wide_detail_viewer(row):
-    with st.container(border=True):
-        st.markdown(f"## 📖 No.{row.get('No.', '-')} | {row.get('논문/도서 제목', '-')}")
+# 팝업 모달창 (화면 중앙 집중형 초대형 뷰어)
+@st.dialog("📖 연구 논문 상세 분석 리포트", width="large")
+def show_detail_dialog(row):
+    st.markdown(f"## 📄 {row.get('논문/도서 제목', '-')}")
+    
+    col_m1, col_m2, col_m3 = st.columns([1, 1, 2])
+    col_m1.info(f"👤 **저자:** {row.get('저자', '-')}")
+    col_m2.info(f"📅 **발행 연도:** {row.get('발행 연도', '-')}")
+    col_m3.info(f"🏛️ **학술지명/출처:** {row.get('학술지명/출처', '-')}")
+    
+    st.divider()
+    
+    col_left, col_right = st.columns(2)
+    with col_left:
+        st.markdown("#### 💡 핵심 이론")
+        st.markdown(f"> {row.get('핵심 이론', '-')}")
         
-        # 메타 배지
-        col_m1, col_m2, col_m3 = st.columns([1, 1, 2])
-        col_m1.info(f"👤 **저자:** {row.get('저자', '-')}")
-        col_m2.info(f"📅 **발행 연도:** {row.get('발행 연도', '-')}")
-        col_m3.info(f"🏛️ **학술지명/출처:** {row.get('학술지명/출처', '-')}")
+        st.markdown("#### 📊 연구 모형")
+        st.code(row.get('연구 모형', '-'), language=None)
         
-        st.divider()
+        st.markdown("#### 🔗 변수 구성")
+        st.markdown(f"- **독립변수(IV):** `{row.get('독립변수(IV)', '-')}`")
+        st.markdown(f"- **종속변수(DV):** `{row.get('종속변수(DV)', '-')}`")
+        st.markdown(f"- **매개변수(Mediator):** `{row.get('매개변수(Mediator)', '-')}`")
+        st.markdown(f"- **조절변수(Moderator):** `{row.get('조절변수(Moderator)', '-')}`")
         
-        # 2단 연구 구조 분석
-        col_left, col_right = st.columns(2)
-        with col_left:
-            st.markdown("#### 💡 핵심 이론")
-            st.markdown(f"> {row.get('핵심 이론', '-')}")
-            
-            st.markdown("#### 📊 연구 모형")
-            st.code(row.get('연구 모형', '-'), language=None)
-            
-            st.markdown("#### 🔗 변수 구성")
-            st.markdown(f"- **독립변수(IV):** `{row.get('독립변수(IV)', '-')}`")
-            st.markdown(f"- **종속변수(DV):** `{row.get('종속변수(DV)', '-')}`")
-            st.markdown(f"- **매개변수(Mediator):** `{row.get('매개변수(Mediator)', '-')}`")
-            st.markdown(f"- **조절변수(Moderator):** `{row.get('조절변수(Moderator)', '-')}`")
-            
-        with col_right:
-            st.markdown("#### 📌 가설 체계")
-            st.text_area("가설 정리 (H1, H2...)", value=str(row.get('가설 정리', '-')), height=150, disabled=True)
-            
-            st.markdown("#### 🎯 주요 발견 (Key Findings)")
-            st.success(row.get('주요 발견(Key Findings)', '-'))
+    with col_right:
+        st.markdown("#### 📌 가설 체계")
+        st.text_area("가설 정리", value=str(row.get('가설 정리', '-')), height=130, disabled=True)
+        
+        st.markdown("#### 🎯 주요 발견 (Key Findings)")
+        st.success(row.get('주요 발견(Key Findings)', '-'))
 
-        st.divider()
-        
-        # 화면 가로 전체를 사용하는 대형 설문문항 영역
-        st.markdown("### 📝 측정 척도 및 설문 문항 원문 (영문/국문)")
-        survey_content = str(row.get('설문문항', '-'))
-        if survey_content and survey_content != "-":
-            st.text_area("설문문항 원문 및 척도 상세 내용 (마우스로 손쉽게 복사 가능)", value=survey_content, height=320)
-        else:
-            st.warning("등록된 세부 설문문항 데이터가 없습니다.")
+    st.divider()
+    
+    # 초대형 설문문항 영역 (복사 용이)
+    st.markdown("### 📝 측정 척도 및 설문 문항 원문 (영문/국문)")
+    survey_content = str(row.get('설문문항', '-'))
+    if survey_content and survey_content != "-":
+        st.text_area("설문문항 상세 (클릭하여 전체 복사 가능)", value=survey_content, height=350)
+    else:
+        st.warning("등록된 세부 설문문항 데이터가 없습니다.")
 
 # 2. 사이드바 관리자 인증
 st.sidebar.title("🔐 관리자 모드")
@@ -181,16 +203,15 @@ if is_admin:
 
 tabs = st.tabs(tab_names)
 
-# [탭 1] 연구 논문 DB 검색 및 대형 중앙 뷰어
+# [탭 1] 연구 논문 DB 검색
 with tabs[0]:
-    st.subheader("🔍 연구 논문 DB 검색 및 중앙 상세 열람")
+    st.subheader("🔍 연구 논문 DB 검색 및 상세 열람")
     
     master_df, _ = load_master_excel()
     
     if master_df.empty:
         st.info("현재 DB에 저장된 논문 데이터가 없습니다. [논문 파일 업로드] 탭에서 논문을 먼저 추가해 보세요.")
     else:
-        # 검색 필터
         col1, col2 = st.columns([2, 1])
         with col1:
             search_kw = st.text_input("🔎 통합 키워드 검색", placeholder="이론, 변수(IV/DV), 저자, 설문문항, 논문 제목 등")
@@ -208,21 +229,22 @@ with tabs[0]:
             filtered_df = filtered_df[filtered_df["핵심 이론"].str.contains(theory_filter, na=False)]
 
         st.write(f"조회 결과: 총 **{len(filtered_df)}건**")
+        st.info("💡 **팁:** 아래 표에서 맨 왼쪽 열(체크박스)을 선택하시면 대형 팝업 창에서 설문문항을 넓게 보실 수 있습니다.")
 
-        # 1. 상단 바로보기 드롭다운 (가장 눈에 잘 띄는 위치)
-        if not filtered_df.empty:
-            paper_options = {f"No.{row['No.']} | {row['저자']} ({row['발행 연도']}) - {str(row['논문/도서 제목'])[:45]}...": row['No.'] for _, row in filtered_df.iterrows()}
-            selected_label = st.selectbox("🎯 열람할 논문을 선택하세요 (선택 즉시 아래에 대형 리포트가 펼쳐집니다)", ["선택하세요..."] + list(paper_options.keys()))
-            
-            # 선택된 논문이 있으면 중앙 대형 뷰어 즉시 출력
-            if selected_label != "선택하세요...":
-                selected_no = paper_options[selected_label]
-                selected_row = filtered_df[filtered_df['No.'] == selected_no].iloc[0]
-                render_wide_detail_viewer(selected_row)
-
-        st.markdown("---")
-        st.markdown("#### 📋 전체 논문 목록 테이블")
-        st.dataframe(filtered_df, use_container_width=True, hide_index=True)
+        # 테이블에서 행(Row) 클릭 시 팝업을 띄우는 핵심 로직
+        selection_event = st.dataframe(
+            filtered_df, 
+            use_container_width=True, 
+            hide_index=True,
+            on_select="rerun",           
+            selection_mode="single-row"  
+        )
+        
+        # 행이 선택된 경우 팝업 다이얼로그 호출
+        if selection_event.selection.rows:
+            selected_index = selection_event.selection.rows[0]
+            selected_row_data = filtered_df.iloc[selected_index]
+            show_detail_dialog(selected_row_data)
 
 # [탭 2] 논문 파일 업로드 및 분석
 with tabs[1]:
@@ -248,7 +270,6 @@ with tabs[1]:
                 for idx, file in enumerate(uploaded_files):
                     file_ext = file.name.split('.')[-1].lower()
                     
-                    # 1. 엑셀 파일 데이터 병합
                     if file_ext in ['xlsx', 'xls']:
                         st.write(f"📊 [{idx+1}/{len(uploaded_files)}] '{file.name}' 엑셀 파일 데이터 병합 중...")
                         try:
@@ -278,7 +299,6 @@ with tabs[1]:
                         except Exception as e:
                             st.error(f"'{file.name}' 엑셀 읽기 오류: {str(e)}")
 
-                    # 2. PDF 논문 AI 분석
                     elif file_ext == 'pdf':
                         st.write(f"⏳ [{idx+1}/{len(uploaded_files)}] '{file.name}' PDF AI 심층 분석 중...")
                         try:
