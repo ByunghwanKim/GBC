@@ -14,10 +14,18 @@ st.set_page_config(
     layout="wide"
 )
 
-# [보안 주의] 개인용 하드코딩 API 키
-MY_API_KEY = st.secrets["OPENAI_API_KEY"]
+# ---------------------------------------------------------
+# [API 키 설정] 
+# Streamlit Cloud의 Advanced settings -> Secrets에 아래 두 키를 등록해야 합니다.
+# ---------------------------------------------------------
+try:
+    OPENAI_API_KEY = st.secrets["OPENAI_API_KEY"] # sk- 로 시작하는 키
+    S2_API_KEY = st.secrets["S2_API_KEY"]         # s2k- 로 시작하는 키
+except KeyError:
+    st.error("⚠️ Streamlit Secrets에 API 키가 설정되지 않았습니다. 설정을 확인해주세요.")
+    st.stop()
 
-# 커스텀 CSS (표 테두리 및 버튼 디자인 개선)
+# 커스텀 CSS
 st.markdown("""
     <style>
     .stDataFrame { border-radius: 10px; overflow: hidden; }
@@ -25,7 +33,6 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-# 2. 메인 UI 구성
 st.title("📄 논문 설문문항 자동 추출 시스템")
 st.markdown("입력한 키워드와 관련된 논문을 검색하고, AI가 연구 변수와 측정 문항을 1:1로 매칭하여 표(Excel)로 추출합니다.")
 
@@ -38,10 +45,9 @@ with col1:
 with col2:
     limit = st.slider("📑 검색할 논문 수", min_value=1, max_value=5, value=3)
 
-query = st.text_input("🔍 검색 키워드 (예: Consumer response to generative AI advertising)")
+query = st.text_input("🔍 검색 키워드 (예: Generative AI advertising)")
 
-
-# 3. 개별 논문 AI 추출 함수 (워커 스레드용)
+# 3. 개별 논문 AI 추출 함수
 def extract_single_paper(paper, client):
     title = paper.get("title", "")
     abstract = paper.get("abstract", "")
@@ -50,7 +56,6 @@ def extract_single_paper(paper, client):
     if not abstract:
         return {"status": "error", "title": title, "msg": "초록 정보가 없습니다."}
 
-    # 영문-국문 순서 지정
     prompt = f"""
     당신은 경영학 및 소비자 행동 연구 방법론 전문가입니다.
     아래 논문 정보를 바탕으로, 연구 변수(Constructs), 설문 문항(Survey Items), 척도(Scale)를 JSON 형식으로 추출해주세요.
@@ -115,34 +120,39 @@ if st.button("검색 및 문항 추출 실행", type="primary"):
                     "fields": "title,abstract,citationCount"
                 }
                 
-                # 동적 연도 계산 적용
                 if year_filter != "전체":
                     current_year = datetime.datetime.now().year
                     if year_filter == "최근 5년":
-                        start_year = current_year - 5
+                        params["year"] = f"{current_year - 5}-"
                     elif year_filter == "최근 10년":
-                        start_year = current_year - 10
+                        params["year"] = f"{current_year - 10}-"
                     elif year_filter == "최근 15년":
-                        start_year = current_year - 15
+                        params["year"] = f"{current_year - 15}-"
                     elif year_filter == "최근 20년":
-                        start_year = current_year - 20
-                    
-                    params["year"] = f"{start_year}-"
+                        params["year"] = f"{current_year - 20}-"
 
-                headers = {"x-api-key": MY_API_KEY}
+                # 💡 가이드에 명시된 부분: x-api-key 헤더에 S2 키 탑재
+                headers = {"x-api-key": S2_API_KEY}
                 res = requests.get(url, params=params, headers=headers)
                 
+                # 에러 디버깅 로직 추가
                 if res.status_code == 429:
                     status.update(label="요청 한도 초과 (잠시 후 다시 시도해주세요)", state="error")
                     st.stop()
-                elif res.status_code != 200 or res.json().get("total", 0) == 0:
-                    status.update(label="해당 조건의 논문을 찾을 수 없습니다.", state="error")
+                elif res.status_code != 200:
+                    status.update(label=f"서버 에러 (상태코드: {res.status_code})", state="error")
+                    st.error(f"상세 로그: {res.text}")
+                    st.stop()
+                elif res.json().get("total", 0) == 0:
+                    status.update(label="조건에 맞는 논문을 찾을 수 없습니다.", state="error")
+                    st.info("💡 팁: 검색어를 '영문'으로 짧게(예: Generative AI advertising) 입력하시고, 출판 연도를 '전체'로 변경해 보세요.")
                     st.stop()
 
                 papers = res.json().get("data", [])
                 st.write(f"✅ {len(papers)}개의 논문 발견! AI 분석을 시작합니다 (병렬 처리)...")
                 
-                client = OpenAI(api_key=MY_API_KEY)
+                # 💡 OpenAI 분석용 클라이언트에는 OpenAI 전용 키 탑재
+                client = OpenAI(api_key=OPENAI_API_KEY)
                 all_extracted_items = []
                 error_logs = []
 
@@ -175,7 +185,6 @@ if st.button("검색 및 문항 추출 실행", type="primary"):
 
         st.subheader(f"📊 추출된 설문 문항 (총 {len(all_extracted_items)}개)")
         
-        # DataFrame 변환 및 순서 지정 (영문 -> 국문)
         df = pd.DataFrame(all_extracted_items)
         df_display = df.rename(columns={
             "paper_title": "논문 제목",
@@ -187,10 +196,8 @@ if st.button("검색 및 문항 추출 실행", type="primary"):
         })
         df_display = df_display[["논문 제목", "피인용 수", "연구 변수", "설문 문항(영문)", "설문 문항(국문)", "척도"]]
         
-        # 화면에 표 출력
         st.dataframe(df_display, use_container_width=True, hide_index=True)
 
-        # 엑셀 다운로드 메모리 버퍼 생성
         buffer = io.BytesIO()
         with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
             df_display.to_excel(writer, index=False, sheet_name='Survey Items')
@@ -198,7 +205,7 @@ if st.button("검색 및 문항 추출 실행", type="primary"):
         st.download_button(
             label="📥 엑셀(Excel) 파일로 다운로드",
             data=buffer.getvalue(),
-            file_name=f"survey_items_{query[:10]}.xlsx",
+            file_name=f"survey_items.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             type="primary"
         )
