@@ -8,7 +8,7 @@ from pypdf import PdfReader
 from github import Github
 from github.GithubException import UnknownObjectException
 
-# 1. 페이지 설정 및 타이틀 변경
+# 1. 페이지 설정 및 타이틀
 st.set_page_config(page_title="GBC 연구 논문 DB 관리 시스템", page_icon="📚", layout="wide")
 
 try:
@@ -30,13 +30,12 @@ model = genai.GenerativeModel(
 repo = Github(GITHUB_TOKEN).get_repo(GITHUB_REPO)
 EXCEL_FILE_PATH = "database/GBC_연구논문_DB.xlsx"
 
-# 표준 15개 컬럼 정의
+# '연구 방법론', '설문문항'이 제외된 최종 정예 13개 컬럼 정의
 DB_COLUMNS = [
     'No.', '저자', '발행 연도', '논문/도서 제목', 
     '학술지명/출처', '핵심 이론', '연구 모형', '가설 정리', 
-    '연구 방법론', '독립변수(IV)', '종속변수(DV)', 
-    '매개변수(Mediator)', '조절변수(Moderator)', 
-    '주요 발견(Key Findings)', '설문문항'
+    '독립변수(IV)', '종속변수(DV)', '매개변수(Mediator)', 
+    '조절변수(Moderator)', '주요 발견(Key Findings)'
 ]
 
 # GitHub에서 마스터 엑셀 파일 불러오기
@@ -46,15 +45,14 @@ def load_master_excel():
         decoded = base64.b64decode(file_content.content)
         df = pd.read_excel(io.BytesIO(decoded))
         
-        # '메모' 컬럼이 있으면 '설문문항'으로 보정
-        if '메모' in df.columns and '설문문항' not in df.columns:
-            df = df.rename(columns={'메모': '설문문항'})
-            
-        # 불필요 컬럼 정리
-        drop_targets = ['상태', '권/호', '실무적 시사점', '국내/해외', '연구 주제/키워드', '메모']
+        # 불필요 컬럼들 정리
+        drop_targets = [
+            '상태', '권/호', '실무적 시사점', '국내/해외', 
+            '연구 주제/키워드', '메모', '연구 방법론', '설문문항'
+        ]
         df = df.drop(columns=[col for col in drop_targets if col in df.columns], errors='ignore')
         
-        # 누락 컬럼 채우기
+        # 누락된 컬럼 보정
         for col in DB_COLUMNS:
             if col not in df.columns:
                 df[col] = "-"
@@ -78,11 +76,11 @@ def save_master_excel(df, sha):
 # 2. UI 화면 구성
 st.title("📚 GBC 연구 논문 DB 관리 시스템")
 
-tab1, tab2 = st.tabs(["🚀 파일 분석 및 DB 누적 (PDF/Excel)", "🔍 연구 논문 DB 검색 및 관리"])
+tab1, tab2 = st.tabs(["🚀 파일 분석 및 DB 누적", "🔍 연구 논문 DB 검색 및 관리"])
 
 # [탭 1] 파일 업로드 및 DB 누적
 with tab1:
-    st.subheader("논문 PDF(AI 자동 추출) 또는 기존 엑셀(DB 일괄 등록) 파일을 업로드하세요.")
+    st.subheader("논문 파일을 업로드 하세요.")
     uploaded_files = st.file_uploader(
         "PDF 또는 Excel 파일을 선택하세요 (다중 선택 가능)", 
         type=['pdf', 'xlsx', 'xls'], 
@@ -110,12 +108,11 @@ with tab1:
                         try:
                             excel_df = pd.read_excel(file)
                             
-                            # 컬럼명 유연 처리
-                            if '메모' in excel_df.columns and '설문문항' not in excel_df.columns:
-                                excel_df = excel_df.rename(columns={'메모': '설문문항'})
-                                
                             # 불필요 컬럼 제거
-                            drop_targets = ['상태', '권/호', '실무적 시사점', '국내/해외', '연구 주제/키워드', '메모']
+                            drop_targets = [
+                                '상태', '권/호', '실무적 시사점', '국내/해외', 
+                                '연구 주제/키워드', '메모', '연구 방법론', '설문문항'
+                            ]
                             excel_df = excel_df.drop(columns=[col for col in drop_targets if col in excel_df.columns], errors='ignore')
                             
                             # 필요한 컬럼 채우기
@@ -136,7 +133,7 @@ with tab1:
                         except Exception as e:
                             st.error(f"'{file.name}' 엑셀 읽기 오류: {str(e)}")
 
-                    # 2. PDF 파일인 경우 -> Gemini AI 심층 분석
+                    # 2. PDF 파일인 경우 -> Gemini AI 분석 (설문문항 제외)
                     elif file_ext == 'pdf':
                         st.write(f"⏳ [{idx+1}/{len(uploaded_files)}] '{file.name}' PDF AI 심층 분석 중...")
                         try:
@@ -150,9 +147,10 @@ with tab1:
                             st.warning(f"'{file.name}'에서 텍스트를 읽지 못했습니다. (스캔 이미지 PDF일 수 있음)")
                             continue
 
+                        # 설문문항 및 연구방법론 제외 프롬프트
                         prompt = f"""
                         당신은 경영학 및 소비자 행동 연구 방법론 최고 전문가입니다.
-                        아래 제공된 연구 논문 텍스트를 정밀 분석하여 다음 12개 항목을 JSON 형식으로 추출해주세요.
+                        아래 제공된 연구 논문 텍스트를 정밀 분석하여 다음 11개 항목을 JSON 형식으로 추출해주세요.
                         
                         추출 형식(JSON):
                         {{
@@ -163,13 +161,11 @@ with tab1:
                             "theories": "핵심 이론 (예: 조절초점이론, 신호이론 등)",
                             "model": "연구 모형 요약 (예: [IV] -> [Mediator] -> [DV])",
                             "hypotheses": "가설 정리 (H1, H2 형식으로 줄바꿈 정리)",
-                            "methodology": "연구 방법론 (예: 2x2 실험설계, 설문조사, 구조방정식 등)",
                             "iv": "독립변수(IV)",
                             "dv": "종속변수(DV)",
                             "mediator": "매개변수(Mediator, 없으면 '-')",
                             "moderator": "조절변수(Moderator, 없으면 '-')",
-                            "findings": "주요 발견(Key Findings)",
-                            "survey_items": "측정 척도 유형 및 실제 측정에 사용된 설문 문항 원문(영문/국문) 상세 정리"
+                            "findings": "주요 발견(Key Findings)"
                         }}
 
                         [논문 원문 텍스트]:
@@ -190,13 +186,11 @@ with tab1:
                                 '핵심 이론': res_json.get('theories', '-'),
                                 '연구 모형': res_json.get('model', '-'),
                                 '가설 정리': res_json.get('hypotheses', '-'),
-                                '연구 방법론': res_json.get('methodology', '-'),
                                 '독립변수(IV)': res_json.get('iv', '-'),
                                 '종속변수(DV)': res_json.get('dv', '-'),
                                 '매개변수(Mediator)': res_json.get('mediator', '-'),
                                 '조절변수(Moderator)': res_json.get('moderator', '-'),
-                                '주요 발견(Key Findings)': res_json.get('findings', '-'),
-                                '설문문항': res_json.get('survey_items', '-')
+                                '주요 발견(Key Findings)': res_json.get('findings', '-')
                             }
                             new_entries.append(entry)
                             st.write(f"✅ '{file.name}' 분석 완료!")
@@ -226,7 +220,7 @@ with tab2:
     else:
         col1, col2 = st.columns([2, 1])
         with col1:
-            search_kw = st.text_input("🔎 통합 키워드 검색", placeholder="이론, 변수(IV/DV), 저자, 설문문항, 논문 제목 등")
+            search_kw = st.text_input("🔎 통합 키워드 검색", placeholder="이론, 변수(IV/DV/매개/조절), 저자, 논문 제목 등")
         with col2:
             all_theories = master_df["핵심 이론"].dropna().str.split('\n').explode().str.strip().unique()
             theory_filter = st.selectbox("💡 핵심 이론별 필터", ["전체 보기"] + [t for t in all_theories if t and t != '-'])
