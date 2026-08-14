@@ -5,6 +5,7 @@ import json
 import concurrent.futures
 import io
 import datetime
+import time
 import google.generativeai as genai
 
 # 1. 페이지 기본 설정
@@ -134,15 +135,17 @@ if st.button("검색 및 문항 추출 실행", type="primary"):
                 error_logs = []
 
                 # 💡 남아있던 OpenAI 관련 코드 완전 제거 후 제미나이 병렬 처리
-                with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
-                    futures = [executor.submit(extract_single_paper, paper) for paper in papers]
+                for idx, paper in enumerate(papers):
+                    st.write(f"⏳ {idx+1}/{len(papers)}번째 논문 분석 중...")
+                    res_data = extract_single_paper(paper)
                     
-                    for future in concurrent.futures.as_completed(futures):
-                        res_data = future.result()
-                        if res_data["status"] == "success":
-                            all_extracted_items.extend(res_data["items"])
-                        else:
-                            error_logs.append(f"- **{res_data['title'][:30]}...**: {res_data['msg']}")
+                    if res_data["status"] == "success":
+                        all_extracted_items.extend(res_data["items"])
+                    else:
+                        error_logs.append(f"- **{res_data['title'][:30]}...**: {res_data['msg']}")
+                        
+                    # 다음 논문 분석 전 2초 대기 (핵심!)
+                    time.sleep(2)
 
                 if not all_extracted_items and error_logs:
                     status.update(label="문항 추출 실패", state="error")
