@@ -22,8 +22,8 @@ except KeyError:
 # 💡 구글 제미나이 AI 초기 설정
 genai.configure(api_key=GEMINI_API_KEY)
 model = genai.GenerativeModel(
-    model_name='gemini-1.5-flash-latest',
-    generation_config={"response_mime_type": "application/json", "temperature": 0.2}
+    model_name='gemini-pro',
+    generation_config={"temperature": 0.2}
 )
 
 # 커스텀 CSS
