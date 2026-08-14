@@ -21,8 +21,22 @@ except KeyError:
 
 # 💡 구글 제미나이 AI 초기 설정
 genai.configure(api_key=GEMINI_API_KEY)
+# 💡 구글 서버에 접속해서 현재 사용 가능한 모델을 자동으로 찾아오는 마법의 코드
+valid_model_name = None
+for m in genai.list_models():
+    if 'generateContent' in m.supported_generation_methods:
+        valid_model_name = m.name
+        # 빠르고 훌륭한 flash 모델이 목록에 있으면 그것을 최우선으로 선택
+        if 'flash' in valid_model_name.lower(): 
+            break
+
+if not valid_model_name:
+    st.error("이 API 키로 접근 가능한 제미나이 모델이 없습니다. API 키를 다시 확인해주세요.")
+    st.stop()
+
+# 찾아낸 모델 이름으로 AI 엔진 장전!
 model = genai.GenerativeModel(
-    model_name='gemini-pro',
+    model_name=valid_model_name,
     generation_config={"temperature": 0.2}
 )
 
