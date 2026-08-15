@@ -483,7 +483,7 @@ with tabs[0]:
                             if st.button("🔍 상세보기", key=f"btn_detail_{idx}_{row['No.']}", use_container_width=True):
                                 show_detail_dialog(row)
 
-# [탭 2] Semantic Scholar 검색 기능 (PDF 유무와 상관없이 한글 초록 버튼 항상 노출)
+# [탭 2] Semantic Scholar 검색 기능 (PDF 다운로드 버튼 옆에 한글 번역 버튼 배치)
 with tabs[1]:
     st.subheader("🌐 Semantic Scholar 글로벌 논문 검색")
 
@@ -539,28 +539,27 @@ with tabs[1]:
                         st.markdown(f"#### 📄 {p_title}")
                         st.markdown(f"<span style='color:#64748B; font-size:14.5px;'>👤 **{authors_str}** &nbsp;|&nbsp; 📅 **{p_year}** &nbsp;|&nbsp; 🏛️ 출처: **{p_venue}** &nbsp;|&nbsp; 📈 피인용: **{p_citations}회**</span>", unsafe_allow_html=True)
                         
-                        c_card1, c_card2 = st.columns([4, 1])
-                        with c_card1:
-                            with st.expander("📖 초록(Abstract) 원문 및 링크 보기"):
-                                st.write(p_abstract)
-                                st.divider()
-                                c_l1, c_l2, c_l3 = st.columns(3)
-                                with c_l1:
-                                    st.markdown(f"🔗 [Semantic Scholar 페이지]({p_url})", unsafe_allow_html=True)
-                                with c_l2:
-                                    if pdf_url:
-                                        st.markdown(f"📄 [원문 페이지 바로가기]({pdf_url})", unsafe_allow_html=True)
-                                    else:
-                                        st.caption("📄 원문 페이지 없음")
-                                with c_l3:
-                                    if pdf_url:
-                                        st.markdown(f"📥 [오픈액세스 PDF 다운로드]({pdf_url})", unsafe_allow_html=True)
-                                    else:
-                                        st.caption("📥 오픈액세스 PDF 없음")
-                        with c_card2:
-                            st.write("")
-                            # [수정] PDF 유무와 상관없이 항상 노출되는 한글 초록 번역 버튼
-                            if st.button("🇰🇷 한글 초록\n번역 보기", key=f"btn_trans_{i}_{paper.get('paperId', i)}", use_container_width=True):
+                        with st.expander("📖 초록(Abstract) 및 링크 보기"):
+                            st.write(p_abstract)
+                            st.divider()
+                            # [수정] 3개 컬럼으로 나눠서 [Semantic Scholar 페이지], [원문 페이지], [오픈액세스 PDF 다운로드] 배치
+                            c_l1, c_l2, c_l3 = st.columns(3)
+                            with c_l1:
+                                st.markdown(f"🔗 [Semantic Scholar 페이지]({p_url})", unsafe_allow_html=True)
+                            with c_l2:
+                                if pdf_url:
+                                    st.markdown(f"📄 [원문 페이지 바로가기]({pdf_url})", unsafe_allow_html=True)
+                                else:
+                                    st.caption("📄 원문 페이지 없음")
+                            with c_l3:
+                                if pdf_url:
+                                    st.markdown(f"📥 [오픈액세스 PDF 다운로드]({pdf_url})", unsafe_allow_html=True)
+                                else:
+                                    st.caption("📥 오픈액세스 PDF 없음")
+                            
+                            st.divider()
+                            # [수정] PDF 다운로드 링크 바로 아래(또는 우측)에 한글 번역 보기 버튼 배치
+                            if st.button("🇰🇷 한글 초록 번역 보기", key=f"btn_trans_{i}_{paper.get('paperId', i)}", use_container_width=True):
                                 show_s2_abstract_dialog(p_title, p_abstract)
 
 # [탭 3] 논문 파일 업로드 및 분석
