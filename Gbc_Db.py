@@ -292,6 +292,25 @@ def save_master_excel(df, sha):
     else:
         repo.create_file(EXCEL_FILE_PATH, "Create GBC 연구논문 DB", content)
 
+def normalize_title(title):
+    """[추가] 중복 논문 판별을 위해 제목을 정규화.
+    공백/구두점/대소문자 차이 때문에 같은 논문이 다르게 인식되는 것을 방지."""
+    import re
+    s = str(title).strip().lower()
+    s = re.sub(r'[^\w가-힣]', '', s)  # 공백, 쉼표, 마침표 등 특수문자 전부 제거
+    return s
+
+def find_duplicate_no(title, master_df):
+    """제목이 이미 마스터 DB에 존재하면 해당 No.를 반환, 없으면 None."""
+    norm_target = normalize_title(title)
+    if norm_target == "":
+        return None
+    existing_norms = master_df['논문/도서 제목'].astype(str).apply(normalize_title)
+    match = master_df[existing_norms == norm_target]
+    if not match.empty:
+        return match.iloc[0]['No.']
+    return None
+
 def safe(text):
     """[추가] AI가 논문에서 추출한 텍스트를 HTML에 삽입하기 전 이스케이프 처리.
     <, >, & 등이 원문에 섞여 있어도 뱃지 레이아웃이 깨지지 않도록 함."""
@@ -441,6 +460,14 @@ with tabs[1]:
         type=['pdf', 'xlsx', 'xls'], 
         accept_multiple_files=True
     )
+
+    # [추가] 제목이 같은(=이미 DB에 있는) 논문을 만났을 때 처리 방식 선택
+    dup_policy = st.radio(
+        "🔁 이미 DB에 있는 논문(제목 기준 중복)을 발견하면?",
+        ["건너뛰기 (중복 추가 방지)", "기존 항목 덮어쓰기 (내용 업데이트)"],
+        horizontal=True,
+        help="같은 논문 PDF/엑셀을 다시 올렸을 때 새 행으로 중복 추가되는 것을 막기 위한 옵션입니다."
+    )
     
     if st.button("파일 처리 및 마스터 DB에 누적 저장", type="primary"):
         if uploaded_files:
@@ -452,6 +479,10 @@ with tabs[1]:
                     current_max_no = int(valid_nos.max())
 
             new_entries = []
+            updated_entries = {}  # {No.: row_dict} - 덮어쓰기 대상
+            skipped_titles = []   # 건너뛴(또는 업데이트된) 논문 제목 기록
+            # 이번 배치 안에서 같은 파일들끼리도 중복 체크가 되도록 별도 세트로 추적
+            titles_seen_this_batch = set()
             
             with st.status("🔍 데이터를 처리하고 있습니다...", expanded=True) as status:
                 for idx, file in enumerate(uploaded_files):
@@ -473,13 +504,37 @@ with tabs[1]:
                                     
                             excel_df = excel_df[DB_COLUMNS]
                             
+                            added_count = 0
                             for _, row in excel_df.iterrows():
-                                current_max_no += 1
                                 row_dict = row.to_dict()
+                                title = row_dict.get('논문/도서 제목', '')
+                                norm_title = normalize_title(title)
+
+                                # [추가] 마스터 DB 기존 항목과 중복 검사
+                                dup_no = find_duplicate_no(title, master_df)
+                                # [추가] 같은 배치 안에서 방금 추가한 항목과도 중복 검사
+                                is_batch_dup = norm_title != "" and norm_title in titles_seen_this_batch
+
+                                if dup_no is not None or is_batch_dup:
+                                    if dup_policy.startswith("건너뛰기"):
+                                        skipped_titles.append(f"{title} (기존 No.{dup_no})" if dup_no else f"{title} (같은 배치 내 중복)")
+                                        continue
+                                    elif dup_no is not None:
+                                        # 덮어쓰기: 기존 No.를 유지한 채 내용만 갱신
+                                        row_dict['No.'] = dup_no
+                                        updated_entries[dup_no] = row_dict
+                                        skipped_titles.append(f"{title} (No.{dup_no} 업데이트됨)")
+                                        continue
+
+                                current_max_no += 1
                                 row_dict['No.'] = current_max_no
                                 new_entries.append(row_dict)
+                                if norm_title:
+                                    titles_seen_this_batch.add(norm_title)
+                                added_count += 1
                                 
-                            st.write(f"✅ '{file.name}' - {len(excel_df)}건의 데이터 등록 완료!")
+                            st.write(f"✅ '{file.name}' - {added_count}건 신규 등록 "
+                                     f"(중복 {len(excel_df) - added_count}건 처리)")
                         except Exception as e:
                             st.error(f"'{file.name}' 엑셀 읽기 오류: {str(e)}")
 
@@ -525,13 +580,18 @@ with tabs[1]:
                         try:
                             response = model.generate_content(prompt)
                             res_json = json.loads(response.text)
-                            
-                            current_max_no += 1
+
+                            pdf_title = res_json.get('title', file.name)
+                            norm_title = normalize_title(pdf_title)
+
+                            # [추가] 마스터 DB 기존 항목 및 같은 배치 내 중복 검사
+                            dup_no = find_duplicate_no(pdf_title, master_df)
+                            is_batch_dup = norm_title != "" and norm_title in titles_seen_this_batch
+
                             entry = {
-                                'No.': current_max_no,
                                 '저자': res_json.get('authors', '-'),
                                 '발행 연도': res_json.get('year', '-'),
-                                '논문/도서 제목': res_json.get('title', file.name),
+                                '논문/도서 제목': pdf_title,
                                 '학술지명/출처': res_json.get('journal', '-'),
                                 '핵심 이론': res_json.get('theories', '-'),
                                 '연구 모형': res_json.get('model', '-'),
@@ -543,18 +603,60 @@ with tabs[1]:
                                 '주요 발견(Key Findings)': res_json.get('findings', '-'),
                                 '설문문항': res_json.get('survey_items', '-')
                             }
+
+                            if dup_no is not None or is_batch_dup:
+                                if dup_policy.startswith("건너뛰기"):
+                                    skipped_titles.append(f"{pdf_title} (기존 No.{dup_no})" if dup_no else f"{pdf_title} (같은 배치 내 중복)")
+                                    st.write(f"⏭️ '{file.name}' — 이미 DB에 있는 논문이라 건너뜀 (제목: {pdf_title})")
+                                    continue
+                                elif dup_no is not None:
+                                    entry['No.'] = dup_no
+                                    updated_entries[dup_no] = entry
+                                    skipped_titles.append(f"{pdf_title} (No.{dup_no} 업데이트됨)")
+                                    st.write(f"🔄 '{file.name}' — 기존 No.{dup_no} 항목 업데이트")
+                                    continue
+
+                            current_max_no += 1
+                            entry['No.'] = current_max_no
                             new_entries.append(entry)
-                            st.write(f"✅ '{file.name}' 분석 완료!")
+                            if norm_title:
+                                titles_seen_this_batch.add(norm_title)
+                            st.write(f"✅ '{file.name}' 분석 완료! (신규 등록)")
                         except Exception as e:
                             st.error(f"'{file.name}' 분석 중 오류: {str(e)}")
 
-                if new_entries:
-                    new_df = pd.DataFrame(new_entries)
-                    updated_df = pd.concat([master_df, new_df], ignore_index=True)
+                if new_entries or updated_entries:
+                    updated_df = master_df.copy()
+
+                    # [추가] 덮어쓰기 대상 반영: 기존 No.에 해당하는 행의 내용을 갱신
+                    for dup_no, row_dict in updated_entries.items():
+                        mask = updated_df['No.'] == dup_no
+                        for k, v in row_dict.items():
+                            if k == 'No.':
+                                continue
+                            updated_df.loc[mask, k] = v
+
+                    # 신규 항목 추가
+                    if new_entries:
+                        new_df = pd.DataFrame(new_entries)
+                        updated_df = pd.concat([updated_df, new_df], ignore_index=True)
+
                     save_master_excel(updated_df, sha)
-                    status.update(label="전체 파일 처리 및 DB 누적 저장 완료!", state="complete", expanded=False)
-                    st.success(f"총 {len(new_entries)}건의 연구 데이터가 'GBC_연구논문_DB'에 완벽하게 누적되었습니다.")
-                    st.dataframe(new_df, use_container_width=True)
+                    status.update(label="전체 파일 처리 및 DB 저장 완료!", state="complete", expanded=False)
+
+                    msg = f"신규 등록 {len(new_entries)}건"
+                    if updated_entries:
+                        msg += f", 기존 항목 업데이트 {len(updated_entries)}건"
+                    if skipped_titles:
+                        msg += f", 중복 처리 {len(skipped_titles)}건"
+                    st.success(msg)
+
+                    if new_entries:
+                        st.dataframe(pd.DataFrame(new_entries), use_container_width=True)
+                    if skipped_titles:
+                        with st.expander(f"🔁 중복으로 처리된 {len(skipped_titles)}건 보기"):
+                            for t in skipped_titles:
+                                st.write(f"- {t}")
                 else:
                     status.update(label="추출/병합된 데이터 없음", state="error")
         else:
