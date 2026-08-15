@@ -11,10 +11,9 @@ from github.GithubException import UnknownObjectException
 # 1. 페이지 설정
 st.set_page_config(page_title="GBC 연구 논문 DB 관리 시스템", page_icon="📚", layout="wide")
 
-# CSS: 폰트, 가독성, 배지(Badge) 디자인, 팝업창 UI 전체 개선
+# CSS: 폰트, 가독성, 배지 디자인, 팝업창 UI 전체 개선 및 디버그 텍스트 원천 차단
 custom_css = """
     <style>
-    /* 대한민국 웹 표준 최고급 폰트 Pretendard 적용 */
     @import url('https://cdn.jsdelivr.net/gh/orioncactus/pretendard/dist/web/static/pretendard.css');
     
     html, body, [class*="st-"] {
@@ -26,20 +25,20 @@ custom_css = """
     #MainMenu {visibility: hidden;}
     footer {visibility: hidden;}
     
-    /* 팝업 모달창 최대화 */
+    /* 불필요한 시스템 텍스트나 내부 속성 숨기기 */
+    .element-container:empty { display: none; }
+    
     div[data-testid="stDialog"] div[role="dialog"] {
         width: 85vw !important;
         max-width: 1200px !important;
         border-radius: 16px;
     }
     
-    /* 전체 텍스트 가독성(줄간격, 색상) 향상 */
     p, li, span, div {
         line-height: 1.6;
         color: #1E293B;
     }
 
-    /* 텍스트 박스(설문문항, 가설) 시인성 극대화 */
     .stTextArea textarea {
         font-size: 15px !important;
         line-height: 1.7 !important;
@@ -50,7 +49,6 @@ custom_css = """
         padding: 12px !important;
     }
     
-    /* 비활성화(disabled)된 텍스트 박스도 흐릿하지 않고 선명하게 보이도록 강제 변경 */
     .stTextArea textarea:disabled {
         background-color: #F1F5F9 !important;
         color: #020617 !important;
@@ -59,7 +57,6 @@ custom_css = """
         cursor: text !important;
     }
 
-    /* 연구 변수(IV, DV, Med, Mod) 컬러 배지 디자인 */
     .badge {
         display: inline-block;
         padding: 5px 12px;
@@ -154,7 +151,6 @@ DB_COLUMNS = [
     '조절변수(Moderator)', '주요 발견(Key Findings)', '설문문항'
 ]
 
-# GitHub 엑셀 로드
 def load_master_excel():
     try:
         file_content = repo.get_contents(EXCEL_FILE_PATH)
@@ -186,7 +182,7 @@ def save_master_excel(df, sha):
     else:
         repo.create_file(EXCEL_FILE_PATH, "Create GBC 연구논문 DB", content)
 
-# 팝업 모달창 (디자인/가독성 대폭 개선)
+# 팝업 모달창
 @st.dialog("📖 연구 논문 상세 분석 리포트", width="large")
 def show_detail_dialog(row):
     st.markdown(f"### 📄 {row.get('논문/도서 제목', '-')}")
@@ -207,7 +203,6 @@ def show_detail_dialog(row):
         st.success(row.get('연구 모형', '-'))
         
         st.markdown("#### 🔗 연구 변수 구성")
-        # 팝업 내에서도 깔끔한 뱃지 적용
         iv = str(row.get('독립변수(IV)', '-')).strip()
         m = str(row.get('매개변수(Mediator)', '-')).strip()
         mod = str(row.get('조절변수(Moderator)', '-')).strip()
@@ -223,8 +218,7 @@ def show_detail_dialog(row):
         
     with col_right:
         st.markdown("#### 📌 가설 체계")
-        # disabled 텍스트 박스 대신 컨테이너 활용 혹은 CSS 강화된 텍스트 에디터 사용
-        st.text_area("가설 정리 (스크롤 가능)", value=str(row.get('가설 정리', '-')), height=150, disabled=True, label_visibility="collapsed")
+        st.text_area("가설 정리", value=str(row.get('가설 정리', '-')), height=150, disabled=True, label_visibility="collapsed")
         
         st.markdown("#### 🎯 주요 발견 (Key Findings)")
         st.warning(row.get('주요 발견(Key Findings)', '-'))
@@ -234,7 +228,7 @@ def show_detail_dialog(row):
     st.markdown("#### 📝 측정 척도 및 설문 문항 원문")
     survey_content = str(row.get('설문문항', '-'))
     if survey_content and survey_content != "-":
-        st.text_area("설문문항 상세 (클릭하여 텍스트 전체 복사 가능)", value=survey_content, height=450, label_visibility="collapsed")
+        st.text_area("설문문항 상세", value=survey_content, height=450, label_visibility="collapsed")
     else:
         st.error("등록된 세부 설문문항 데이터가 없습니다.")
 
@@ -266,7 +260,6 @@ with tabs[0]:
     if master_df.empty:
         st.info("현재 DB에 저장된 논문 데이터가 없습니다. [논문 파일 업로드] 탭에서 논문을 먼저 추가해 보세요.")
     else:
-        # 검색부 UI 개선
         with st.container(border=True):
             col1, col2 = st.columns([2, 1])
             with col1:
@@ -277,7 +270,6 @@ with tabs[0]:
 
         filtered_df = master_df.copy()
         
-        # 띄어쓰기 완전 무시 검색 로직
         if search_kw.strip():
             kw_clean = search_kw.replace(" ", "").lower()
             mask = filtered_df.astype(str).apply(
@@ -290,24 +282,18 @@ with tabs[0]:
 
         st.markdown(f"##### 📌 조회 결과: 총 **{len(filtered_df)}** 건")
         
-        # ---------------------------------------------------------
-        # [핵심 변경] 리스트 카드형 UI 및 학술 DB 벤치마킹 뱃지 적용
-        # ---------------------------------------------------------
         if filtered_df.empty:
             st.warning("조건에 맞는 논문이 없습니다. 검색어를 변경해 보세요.")
         else:
-            # 750px 고정 스크롤 영역 적용
             with st.container(height=750, border=False):
                 for idx, row in filtered_df.iterrows():
                     with st.container(border=True):
                         c1, c2 = st.columns([6, 1])
                         
                         with c1:
-                            # 논문 메타 정보
                             st.markdown(f"#### 📄 {row.get('논문/도서 제목', '-')}")
                             st.markdown(f"<span style='color:#64748B; font-size:14px;'>👤 **{row.get('저자', '-')}** &nbsp;|&nbsp; 📅 **{row.get('발행 연도', '-')}** &nbsp;|&nbsp; 🏛️ **{row.get('학술지명/출처', '-')}**</span>", unsafe_allow_html=True)
                             
-                            # 벤치마킹된 세련된 변수 배지(Badge) 렌더링
                             iv = str(row.get('독립변수(IV)', '-')).strip()
                             m = str(row.get('매개변수(Mediator)', '-')).strip()
                             mod = str(row.get('조절변수(Moderator)', '-')).strip()
