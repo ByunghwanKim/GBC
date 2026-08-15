@@ -8,6 +8,7 @@ import textwrap
 import urllib.parse
 import requests
 import datetime
+import time
 import google.generativeai as genai
 from pypdf import PdfReader
 from github import Github
@@ -213,8 +214,8 @@ def disp(val, default="-"):
 def safe(text):
     return html.escape(str(text))
 
-# Semantic Scholar 검색 함수 (연도 필터 추가 지원)
-def search_semantic_scholar(query, limit=10, year_range="전체 기간"):
+# [수정] 429 에러 대응 자동 재시도(Retry) 로직이 포함된 Semantic Scholar 검색 함수
+def search_semantic_scholar(query, limit=10, year_range="전체 기간", max_retries=2):
     url = f"https://api.semanticscholar.org/graph/v1/paper/search?query={urllib.parse.quote(query)}&limit={limit}&fields=title,authors,year,venue,abstract,url,citationCount,isOpenAccess,openAccessPdf"
     
     if year_range != "전체 기간":
@@ -236,14 +237,26 @@ def search_semantic_scholar(query, limit=10, year_range="전체 기간"):
     headers = {"User-Agent": "GBC-Research-App/1.0"}
     if S2_API_KEY:
         headers["x-api-key"] = S2_API_KEY
-    try:
-        response = requests.get(url, headers=headers, timeout=10)
-        if response.status_code == 200:
-            return response.json()
-        else:
-            return {"error": f"API 오류 (상태 코드: {response.status_code})"}
-    except Exception as e:
-        return {"error": f"네트워크 오류: {str(e)}"}
+
+    for attempt in range(max_retries + 1):
+        try:
+            response = requests.get(url, headers=headers, timeout=12)
+            if response.status_code == 200:
+                return response.json()
+            elif response.status_code == 429:
+                if attempt < max_retries:
+                    time.sleep(2.0) # 2초 대기 후 재시도
+                    continue
+                else:
+                    return {"error": "API 요청 한도 초과 (429 Too Many Requests). 잠시 후 다시 시도해 주세요."}
+            else:
+                return {"error": f"API 오류 (상태 코드: {response.status_code})"}
+        except Exception as e:
+            if attempt < max_retries:
+                time.sleep(1.5)
+                continue
+            return {"error": f"네트워크 오류: {str(e)}"}
+    return {"error": "알 수 없는 API 호출 실패"}
 
 # 팝업 모달창
 @st.dialog("📖 연구 논문 상세 분석 리포트", width="large")
@@ -396,7 +409,7 @@ with tabs[0]:
                             if st.button("🔍 상세보기\n(설문문항)", key=f"btn_detail_{idx}_{row['No.']}", use_container_width=True):
                                 show_detail_dialog(row)
 
-# [탭 2] Semantic Scholar 검색 기능 (링크 3종 세트 복원)
+# [탭 2] Semantic Scholar 검색 기능
 with tabs[1]:
     st.subheader("🌐 Semantic Scholar 글로벌 논문 검색")
 
@@ -455,7 +468,6 @@ with tabs[1]:
                         with st.expander("📖 초록(Abstract) 및 링크 보기"):
                             st.write(p_abstract)
                             st.divider()
-                            # [복원] Semantic Scholar 페이지, 원문 페이지, PDF 다운로드 3가지 링크 컬럼 분할
                             c_l1, c_l2, c_l3 = st.columns(3)
                             with c_l1:
                                 st.markdown(f"🔗 [Semantic Scholar 페이지]({p_url})", unsafe_allow_html=True)
