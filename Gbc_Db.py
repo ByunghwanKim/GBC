@@ -345,7 +345,7 @@ if is_admin:
 
 tabs = st.tabs(tab_names)
 
-# [탭 1] 연구 논문 DB 검색 (필드 선택형 정밀 검색 적용)
+# [탭 1] 연구 논문 DB 검색
 with tabs[0]:
     st.subheader("🔍 연구 논문 DB 정밀 검색")
     
@@ -357,7 +357,6 @@ with tabs[0]:
         with st.container(border=True):
             col_f1, col_f2 = st.columns([1, 2])
             with col_f1:
-                # 검색 필드 선택 옵션
                 search_field = st.selectbox(
                     "🎯 검색 필드 선택", 
                     ["전체 (통합 검색)", "저자", "발행년도", "제목", "변수 (IV/DV/매개/조절)", "가설", "출처", "핵심 이론"]
@@ -452,6 +451,7 @@ with tabs[0]:
                             
                         with c2:
                             st.write("") 
+                            # [수정] 버튼 텍스트에서 \n(설문문항)을 제거하고 '상세보기'만 표시
                             if st.button("🔍 상세보기", key=f"btn_detail_{idx}_{row['No.']}", use_container_width=True):
                                 show_detail_dialog(row)
 
@@ -623,7 +623,12 @@ with tabs[2]:
                         prompt = f"""
                         당신은 경영학 및 소비자 행동 연구 방법론 최고 전문가입니다.
                         아래 제공된 연구 논문 텍스트를 정밀 분석하여 다음 13개 항목을 JSON 형식으로 추출해주세요.
-                        특히, 연구 방법론(Methodology) 및 부록(Appendix)을 꼼꼼히 살펴 변수별 측정 문항을 'survey_items'에 상세히 기재하세요. (주의: 5점 척도, 7점 척도 등 점수 체계에 대한 설명은 절대 포함하지 말고 오직 문항만 작성하세요.)
+                        특히, 연구 방법론(Methodology) 및 부록(Appendix)을 꼼꼼히 살펴 변수별 측정 문항을 'survey_items'에 상세히 기재하세요.
+                        (주의: 5점 척도, 7점 척도 등 점수 체계에 대한 설명은 절대 포함하지 말고 오직 문항만 작성하세요.)
+                        (매우 중요: 설문 문항을 작성할 때는 각 문항마다 [영문 원문] 바로 아래 줄에 [국문 번역문]을 괄호로 감싸서 총 2줄 형태로 구성하세요. 예시:
+                        - Consumers perceived high utility when using the AI service.
+                        (소비자는 AI 서비스를 사용할 때 높은 유효성을 지각하였다.)
+                        )
                         
                         추출 형식(JSON):
                         {{
@@ -639,7 +644,7 @@ with tabs[2]:
                             "mediator": "매개변수(Mediator, 없으면 '-')",
                             "moderator": "조절변수(Moderator, 없으면 '-')",
                             "findings": "주요 발견(Key Findings)",
-                            "survey_items": "변수별 측정에 사용된 실제 설문 문항 원문(영문/국문 번역 병기)만을 줄바꿈하여 작성 (척도/점수 체계 제외)",
+                            "survey_items": "변수별 측정에 사용된 실제 설문 문항 원문. 각 문항은 영문 아래에 (국문 번역)이 2줄 형태로 오도록 줄바꿈하여 작성 (척도/점수 체계 제외)",
                             "doi_or_url": "논문 원문에 표기된 DOI(예: 10.1086/209231) 또는 접근 가능한 URL. 없으면 '-'"
                         }}
 
