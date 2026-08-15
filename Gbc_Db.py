@@ -220,24 +220,32 @@ with tabs[0]:
             filtered_df = filtered_df[filtered_df["핵심 이론"].str.contains(theory_filter, na=False)]
 
         st.write(f"조회 결과: 총 **{len(filtered_df)}건**")
-        st.info("💡 **팁:** 아래 표에서 원하시는 논문의 **아무 곳(제목, 저자 등)**이나 한 번만 클릭하시면 즉시 대형 창이 열립니다.")
+        st.info("💡 **팁:** 표 왼쪽의 **체크박스**를 누르시면 대형 팝업 창에서 설문문항을 넓게 보실 수 있습니다.")
         
         # ---------------------------------------------------------
-        # [핵심 변경] 표(Dataframe) 직접 클릭 방식 복구
+        # [핵심 변경] 체크박스 해제를 위한 고유 키(key) 지정 및 상태 관리
         # ---------------------------------------------------------
-        selection_event = st.dataframe(
+        st.dataframe(
             filtered_df, 
             use_container_width=True, 
             hide_index=True,
-            on_select="rerun",           # 행 클릭 시 팝업을 위한 화면 갱신
-            selection_mode="single-row"  # 단일 행 클릭 활성화
+            on_select="rerun",
+            selection_mode="single-row",
+            key="paper_table_selection" # 세션 상태 접근용 고유 키 지정
         )
         
-        # 행이 선택된 경우 팝업 다이얼로그 호출
-        if selection_event.selection.rows:
-            selected_index = selection_event.selection.rows[0]
-            selected_row_data = filtered_df.iloc[selected_index]
-            show_detail_dialog(selected_row_data)
+        # 행이 체크(선택)된 경우 팝업을 띄우고 즉시 체크 상태 해제
+        if "paper_table_selection" in st.session_state:
+            selected_rows = st.session_state.paper_table_selection["selection"]["rows"]
+            if len(selected_rows) > 0:
+                selected_index = selected_rows[0]
+                selected_row_data = filtered_df.iloc[selected_index]
+                
+                # 창을 닫았을 때 체크가 풀려있도록 Session State 강제 초기화
+                st.session_state.paper_table_selection["selection"]["rows"] = []
+                
+                # 모달 다이얼로그 호출
+                show_detail_dialog(selected_row_data)
 
 # [탭 2] 논문 파일 업로드 및 분석
 with tabs[1]:
