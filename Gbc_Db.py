@@ -218,30 +218,32 @@ with tabs[0]:
             
         if theory_filter != "전체 보기":
             filtered_df = filtered_df[filtered_df["핵심 이론"].str.contains(theory_filter, na=False)]
-            
-        # ---------------------------------------------------------
-        # [핵심 변경] 표 맨 앞에 '🔍 보기' 열(버튼 역할) 추가
-        # ---------------------------------------------------------
-        if not filtered_df.empty:
-            filtered_df.insert(0, '🔍 상세', '🔍 보기')
 
         st.write(f"조회 결과: 총 **{len(filtered_df)}건**")
-        st.info("💡 **팁:** 표 맨 왼쪽 열을 클릭하시면 해당 논문의 대형 팝업 리포트가 열립니다.")
+        st.markdown("---")
         
-        # 에러를 방지하기 위해 순수하게 선택 이벤트만 감지 (강제 초기화 로직 제거)
-        selection_event = st.dataframe(
-            filtered_df, 
-            use_container_width=True, 
-            hide_index=True,
-            on_select="rerun",
-            selection_mode="single-row"
-        )
-        
-        # 클릭 이벤트 처리
-        if selection_event.selection.rows:
-            selected_index = selection_event.selection.rows[0]
-            selected_row_data = filtered_df.iloc[selected_index]
-            show_detail_dialog(selected_row_data)
+        # ---------------------------------------------------------
+        # [핵심 변경] 체크박스 달린 표 삭제 -> 직관적인 '카드형 리스트 + 진짜 버튼' 도입
+        # ---------------------------------------------------------
+        if filtered_df.empty:
+            st.warning("조건에 맞는 논문이 없습니다.")
+        else:
+            for idx, row in filtered_df.iterrows():
+                # 각각의 논문을 예쁜 박스(Container) 안에 담아 표현
+                with st.container(border=True):
+                    c1, c2 = st.columns([6, 1])
+                    
+                    with c1:
+                        st.markdown(f"##### 📄 {row.get('논문/도서 제목', '-')}")
+                        # 핵심 정보만 컴팩트하게 노출
+                        st.caption(f"👤 **저자:** {row.get('저자', '-')} &nbsp;|&nbsp; 📅 **연도:** {row.get('발행 연도', '-')} &nbsp;|&nbsp; 🏛️ **출처:** {row.get('학술지명/출처', '-')}")
+                        st.caption(f"🎯 **IV:** `{row.get('독립변수(IV)', '-')}` ➡️ **DV:** `{row.get('종속변수(DV)', '-')}`")
+                        
+                    with c2:
+                        st.write("") # 버튼 위아래 여백 맞춤
+                        # 진짜 클릭 가능한 버튼 생성! 누르면 바로 팝업 오픈
+                        if st.button("🔍 상세보기", key=f"btn_detail_{row['No.']}", use_container_width=True):
+                            show_detail_dialog(row)
 
 # [탭 2] 논문 파일 업로드 및 분석
 with tabs[1]:
@@ -367,8 +369,6 @@ with tabs[1]:
                     save_master_excel(updated_df, sha)
                     status.update(label="전체 파일 처리 및 DB 누적 저장 완료!", state="complete", expanded=False)
                     st.success(f"총 {len(new_entries)}건의 연구 데이터가 'GBC_연구논문_DB'에 완벽하게 누적되었습니다.")
-                    
-                    # 업로드 탭에서도 보기 좋게 렌더링
                     st.dataframe(new_df, use_container_width=True)
                 else:
                     status.update(label="추출/병합된 데이터 없음", state="error")
