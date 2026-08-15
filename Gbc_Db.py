@@ -124,13 +124,13 @@ def get_available_gemini_model():
         if selected_model:
             return genai.GenerativeModel(
                 model_name=selected_model,
-                generation_config={"response_mime_type": "application/json", "temperature": 0.1}
+                generation_config={"temperature": 0.3}
             )
     except Exception:
         pass
     return genai.GenerativeModel(
         model_name='gemini-2.5-flash',
-        generation_config={"response_mime_type": "application/json", "temperature": 0.1}
+        generation_config={"temperature": 0.3}
     )
 
 model = get_available_gemini_model()
@@ -266,7 +266,7 @@ def search_semantic_scholar(query, limit=10, year_range="전체 기간", max_ret
             return {"error": f"네트워크 오류: {str(e)}"}
     return {"error": "알 수 없는 API 호출 실패"}
 
-# 팝업 모달창
+# 팝업 모달창 (DB 검색용)
 @st.dialog("📖 연구 논문 상세 분석 리포트", width="large")
 def show_detail_dialog(row):
     _title = disp(row.get('논문/도서 제목'))
@@ -325,6 +325,35 @@ def show_detail_dialog(row):
         st.text_area("설문문항 상세", value=survey_content, height=450, label_visibility="collapsed")
     else:
         st.error("등록된 세부 설문문항 데이터가 없습니다.")
+
+# [추가] Semantic Scholar 초록 한글 번역 팝업 모달창
+@st.dialog("🇰🇷 Semantic Scholar 논문 초록 한글 번역", width="large")
+def show_s2_abstract_dialog(title, abstract):
+    st.markdown(f"### 📄 {safe(title)}")
+    st.divider()
+    
+    col_t1, col_t2 = st.columns(2)
+    with col_t1:
+        st.markdown("#### 🇺🇸 영문 원본 초록 (Original Abstract)")
+        st.text_area("영문 초록", value=abstract, height=350, disabled=True, label_visibility="collapsed")
+        
+    with col_t2:
+        st.markdown("#### 🇰🇷 AI 한글 번역 초록 (Korean Translation)")
+        with st.spinner("Gemini AI가 학술 전문 용어로 번역 중입니다..."):
+            try:
+                trans_prompt = f"""
+                다음은 경영학 및 소비자 행동 연구 논문의 영문 초록입니다. 
+                학술 연구자가 읽기 쉽도록 전문적이고 자연스러운 경영학/방법론 용어를 사용하여 한국어로 번역해주세요.
+                
+                [영문 초록]:
+                {abstract}
+                """
+                res = model.generate_content(trans_prompt)
+                korean_abstract = res.text.strip()
+            except Exception as e:
+                korean_abstract = f"번역 중 오류가 발생했습니다: {str(e)}"
+                
+        st.text_area("한글 번역 초록", value=korean_abstract, height=350, label_visibility="collapsed")
 
 # 사이드바 관리자 인증
 st.sidebar.title("🔐 관리자 모드")
@@ -451,11 +480,10 @@ with tabs[0]:
                             
                         with c2:
                             st.write("") 
-                            # [수정] 버튼 텍스트에서 \n(설문문항)을 제거하고 '상세보기'만 표시
                             if st.button("🔍 상세보기", key=f"btn_detail_{idx}_{row['No.']}", use_container_width=True):
                                 show_detail_dialog(row)
 
-# [탭 2] Semantic Scholar 검색 기능
+# [탭 2] Semantic Scholar 검색 기능 (한글 초록 번역 버튼 추가)
 with tabs[1]:
     st.subheader("🌐 Semantic Scholar 글로벌 논문 검색")
 
@@ -511,22 +539,29 @@ with tabs[1]:
                         st.markdown(f"#### 📄 {p_title}")
                         st.markdown(f"<span style='color:#64748B; font-size:14.5px;'>👤 **{authors_str}** &nbsp;|&nbsp; 📅 **{p_year}** &nbsp;|&nbsp; 🏛️ 출처: **{p_venue}** &nbsp;|&nbsp; 📈 피인용: **{p_citations}회**</span>", unsafe_allow_html=True)
                         
-                        with st.expander("📖 초록(Abstract) 및 링크 보기"):
-                            st.write(p_abstract)
-                            st.divider()
-                            c_l1, c_l2, c_l3 = st.columns(3)
-                            with c_l1:
-                                st.markdown(f"🔗 [Semantic Scholar 페이지]({p_url})", unsafe_allow_html=True)
-                            with c_l2:
-                                if pdf_url:
-                                    st.markdown(f"📄 [원문 페이지 바로가기]({pdf_url})", unsafe_allow_html=True)
-                                else:
-                                    st.caption("📄 원문 페이지 없음")
-                            with c_l3:
-                                if pdf_url:
-                                    st.markdown(f"📥 [오픈액세스 PDF 다운로드]({pdf_url})", unsafe_allow_html=True)
-                                else:
-                                    st.caption("📥 오픈액세스 PDF 없음")
+                        c_card1, c_card2 = st.columns([4, 1])
+                        with c_card1:
+                            with st.expander("📖 초록(Abstract) 원문 및 링크 보기"):
+                                st.write(p_abstract)
+                                st.divider()
+                                c_l1, c_l2, c_l3 = st.columns(3)
+                                with c_l1:
+                                    st.markdown(f"🔗 [Semantic Scholar 페이지]({p_url})", unsafe_allow_html=True)
+                                with c_l2:
+                                    if pdf_url:
+                                        st.markdown(f"📄 [원문 페이지 바로가기]({pdf_url})", unsafe_allow_html=True)
+                                    else:
+                                        st.caption("📄 원문 페이지 없음")
+                                with c_l3:
+                                    if pdf_url:
+                                        st.markdown(f"📥 [오픈액세스 PDF 다운로드]({pdf_url})", unsafe_allow_html=True)
+                                    else:
+                                        st.caption("📥 오픈액세스 PDF 없음")
+                        with c_card2:
+                            st.write("")
+                            # [추가] 한글 초록 번역 보기 버튼
+                            if st.button("🇰🇷 한글 초록\n번역 보기", key=f"btn_trans_{i}_{paper.get('paperId', i)}", use_container_width=True):
+                                show_s2_abstract_dialog(p_title, p_abstract)
 
 # [탭 3] 논문 파일 업로드 및 분석
 with tabs[2]:
