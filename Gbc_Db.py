@@ -46,10 +46,96 @@ footer {visibility: hidden;}
 /* 불필요한 시스템 텍스트나 내부 속성 숨기기 */
 .element-container:empty { display: none; }
 
+/* ===== [추가] 기본 페이지 - 전체 글자 크기 및 여백 조정 ===== */
+
+/* 본문 기본 폰트: 기본보다 살짝 키워서 가독성 향상 */
+html, body {
+font-size: 16px !important;
+}
+
+/* 페이지 타이틀(st.title) */
+h1 {
+font-size: 2rem !important;
+font-weight: 800 !important;
+}
+
+/* st.subheader, 카드/다이얼로그 안 소제목(####) */
+h2 {
+font-size: 1.4rem !important;
+font-weight: 700 !important;
+}
+h3 {
+font-size: 1.2rem !important;
+font-weight: 700 !important;
+}
+h4 {
+font-size: 1.05rem !important;
+font-weight: 700 !important;
+margin-top: 0.4rem !important;
+margin-bottom: 0.6rem !important;
+}
+
+/* 탭 라벨 글자 크기 */
+[data-testid="stTab"] p {
+font-size: 15.5px !important;
+font-weight: 600 !important;
+}
+
+/* 검색 결과 카드(st.container(border=True)) 박스 크기 - 패딩/여백 확대 */
+[data-testid="stContainer"] {
+padding: 4px 2px;
+}
+[data-testid="stVerticalBlockBorderWrapper"] {
+border-radius: 14px !important;
+}
+
+/* 텍스트 입력창 / 셀렉트박스 - 글자 크기, 박스 높이(패딩) 확대 */
+[data-testid="stTextInput"] input,
+[data-testid="stTextInputRootElement"] input {
+font-size: 15.5px !important;
+padding: 10px 14px !important;
+}
+[data-testid="stSelectbox"] div[data-baseweb="select"] {
+font-size: 15.5px !important;
+min-height: 46px !important;
+}
+
+/* 버튼 - 글자 크기, 박스 패딩 확대 */
+[data-testid="stButton"] button {
+font-size: 15px !important;
+padding: 8px 18px !important;
+border-radius: 8px !important;
+}
+
+/* st.info / st.success / st.warning / st.error 박스 - 글자 크기, 내부 여백 확대 */
+[data-testid="stAlertContainer"] {
+font-size: 15px !important;
+padding: 14px 18px !important;
+border-radius: 10px !important;
+}
+[data-testid="stAlertContainer"] p {
+font-size: 15px !important;
+line-height: 1.6 !important;
+}
+
 div[data-testid="stDialog"] div[role="dialog"] {
 width: 85vw !important;
 max-width: 1200px !important;
 border-radius: 16px;
+padding: 8px 12px !important;
+}
+
+/* 상세페이지(다이얼로그) 안 본문/캡션 글자 크기 확대 */
+div[data-testid="stDialog"] p,
+div[data-testid="stDialog"] li {
+font-size: 15.5px !important;
+line-height: 1.7 !important;
+}
+div[data-testid="stDialog"] h3 {
+font-size: 1.35rem !important;
+}
+div[data-testid="stDialog"] h4 {
+font-size: 1.1rem !important;
 }
 
 p, li, span, div {
@@ -58,13 +144,13 @@ color: #1E293B;
 }
 
 .stTextArea textarea {
-font-size: 15px !important;
-line-height: 1.7 !important;
+font-size: 15.5px !important;
+line-height: 1.75 !important;
 background-color: #F8FAFC !important;
 color: #0F172A !important;
 border: 1px solid #CBD5E1 !important;
-border-radius: 8px !important;
-padding: 12px !important;
+border-radius: 10px !important;
+padding: 14px !important;
 }
 
 .stTextArea textarea:disabled {
@@ -77,9 +163,9 @@ cursor: text !important;
 
 .badge {
 display: inline-block;
-padding: 5px 12px;
-border-radius: 6px;
-font-size: 13.5px;
+padding: 6px 14px;
+border-radius: 7px;
+font-size: 14px;
 font-weight: 700;
 margin-right: 8px;
 margin-bottom: 8px;
@@ -91,7 +177,7 @@ box-shadow: 0 1px 2px rgba(0,0,0,0.05);
 .badge-mod { background-color: #FFF7ED; color: #C2410C; border: 1px solid #FED7AA; }
 
 .var-text {
-font-size: 14.5px;
+font-size: 15px;
 font-weight: 600;
 color: #334155;
 margin-right: 18px;
@@ -324,7 +410,7 @@ with tabs[0]:
                         
                         with c1:
                             st.markdown(f"#### 📄 {row.get('논문/도서 제목', '-')}")
-                            st.markdown(f"<span style='color:#64748B; font-size:14px;'>👤 **{safe(row.get('저자', '-'))}** &nbsp;|&nbsp; 📅 **{safe(row.get('발행 연도', '-'))}** &nbsp;|&nbsp; 🏛️ **{safe(row.get('학술지명/출처', '-'))}**</span>", unsafe_allow_html=True)
+                            st.markdown(f"<span style='color:#64748B; font-size:15px;'>👤 **{safe(row.get('저자', '-'))}** &nbsp;|&nbsp; 📅 **{safe(row.get('발행 연도', '-'))}** &nbsp;|&nbsp; 🏛️ **{safe(row.get('학술지명/출처', '-'))}**</span>", unsafe_allow_html=True)
                             
                             iv = str(row.get('독립변수(IV)', '-')).strip()
                             m = str(row.get('매개변수(Mediator)', '-')).strip()
