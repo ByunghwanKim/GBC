@@ -223,29 +223,32 @@ with tabs[0]:
         st.info("💡 **팁:** 표 왼쪽의 **체크박스**를 누르시면 대형 팝업 창에서 설문문항을 넓게 보실 수 있습니다.")
         
         # ---------------------------------------------------------
-        # [핵심 변경] 체크박스 해제를 위한 고유 키(key) 지정 및 상태 관리
+        # [에러 완벽 해결] 동적 Key를 사용하여 체크박스 강제 초기화
         # ---------------------------------------------------------
-        st.dataframe(
+        # 1. 테이블 리셋을 위한 키(Key) 카운터 생성
+        if "table_reset_key" not in st.session_state:
+            st.session_state.table_reset_key = 0
+
+        # 2. 고유 키에 카운터를 붙여서 표 렌더링
+        selection_event = st.dataframe(
             filtered_df, 
             use_container_width=True, 
             hide_index=True,
             on_select="rerun",
             selection_mode="single-row",
-            key="paper_table_selection" # 세션 상태 접근용 고유 키 지정
+            key=f"paper_table_{st.session_state.table_reset_key}" 
         )
         
-        # 행이 체크(선택)된 경우 팝업을 띄우고 즉시 체크 상태 해제
-        if "paper_table_selection" in st.session_state:
-            selected_rows = st.session_state.paper_table_selection["selection"]["rows"]
-            if len(selected_rows) > 0:
-                selected_index = selected_rows[0]
-                selected_row_data = filtered_df.iloc[selected_index]
-                
-                # [오류 해결] 내부를 직접 수정하지 않고, 선택 상태 딕셔너리 전체를 빈 값으로 덮어씌움
-                st.session_state.paper_table_selection = {"selection": {"rows": [], "columns": []}}
-                
-                # 모달 다이얼로그 호출
-                show_detail_dialog(selected_row_data)
+        # 3. 행이 체크(선택)된 경우
+        if selection_event.selection.rows:
+            selected_index = selection_event.selection.rows[0]
+            selected_row_data = filtered_df.iloc[selected_index]
+            
+            # 창을 닫고 돌아왔을 때 표가 초기화(체크 해제)되도록 카운터를 1 증가시킴!
+            st.session_state.table_reset_key += 1
+            
+            # 모달 다이얼로그 호출
+            show_detail_dialog(selected_row_data)
 
 # [탭 2] 논문 파일 업로드 및 분석
 with tabs[1]:
