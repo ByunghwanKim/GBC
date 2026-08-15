@@ -194,7 +194,6 @@ def normalize_title(title):
     return s
 
 def find_duplicate_row(title, master_df):
-    """제목이 일치하는 기존 행 전체를 반환"""
     norm_target = normalize_title(title)
     if norm_target == "":
         return None
@@ -205,7 +204,6 @@ def find_duplicate_row(title, master_df):
     return None
 
 def calculate_completeness(row):
-    """행의 데이터 완성도 점수 계산 (결측이나 '-'가 아닌 필드 개수)"""
     check_cols = [c for c in DB_COLUMNS if c not in ('No.', '논문/도서 제목')]
     score = 0
     for c in check_cols:
@@ -492,15 +490,17 @@ with tabs[1]:
                                 else:
                                     st.caption("📥 오픈액세스 PDF 없음")
 
-# [탭 3] 논문 파일 업로드 및 분석 (스마트 검증 및 히든 중복 처리 적용)
+# [탭 3] 논문 파일 업로드 및 분석 (모바일 파일 선택 호환성 개편 완료)
 with tabs[2]:
     st.subheader("🚀 논문 파일을 업로드 하세요.")
     st.caption("📂 파일을 올리면 동일 논문 유무를 자동으로 판단하여, 더 충실한 내용으로 스마트 업데이트되거나 신규 등록됩니다.")
     
+    # [수정] 모바일 브라우저(크롬, 사파리 등)에서 PDF 파일이 비활성화되거나 보이지 않는 현상을 해결하기 위해
+    # type 파라미터를 아예 비워두어 모바일 탐색기가 모든 문서 파일을 온전히 열 수 있도록 변경
     uploaded_files = st.file_uploader(
         "PDF 또는 Excel 파일을 선택하세요 (다중 선택 가능)", 
-        type=['pdf', 'xlsx', 'xls'], 
-        accept_multiple_files=True
+        accept_multiple_files=True,
+        help="모바일 기기에서 파일이 보이지 않는 문제를 해결하기 위해 모든 파일 선택이 허용되도록 설정되었습니다. PDF(.pdf) 또는 엑셀(.xlsx) 파일을 선택해주세요."
     )
     
     if st.button("파일 처리 및 마스터 DB에 누적 저장", type="primary"):
@@ -549,7 +549,6 @@ with tabs[2]:
                                 existing_row = find_duplicate_row(title, master_df)
                                 if existing_row is not None:
                                     existing_no = existing_row['No.']
-                                    # 스마트 검증: 새로 들어온 데이터의 완성도 vs 기존 데이터의 완성도 비교
                                     old_score = calculate_completeness(existing_row)
                                     new_score = calculate_completeness(row_dict)
 
@@ -664,6 +663,9 @@ with tabs[2]:
                         except Exception as e:
                             st.error(f"'{file.name}' 분석 중 오류: {str(e)}")
 
+                    else:
+                        st.warning(f"⚠️ '{file.name}'은 지원하지 않는 파일 형식입니다. PDF(.pdf) 또는 엑셀(.xlsx) 파일만 업로드해주세요.")
+
                 if new_entries or updated_entries:
                     updated_df = master_df.copy()
 
@@ -690,13 +692,13 @@ with tabs[2]:
                     if new_entries:
                         st.dataframe(pd.DataFrame(new_entries), use_container_width=True)
                 else:
-                    status.update(label="추출/병합된 데이터 없음 (또는 모두 기존 정보가 더 우수함)", state="error")
+                    status.update(label="추출/병합된 데이터 없음", state="error")
                     if processed_logs:
                         with st.expander("📋 상세 처리 결과 로그 보기"):
                             for log in processed_logs:
                                 st.write(log)
         else:
-            st.warning("업로드할 PDF 또는 엑셀 파일을 선택해주세요.")
+            st.warning("업로드할 파일을 선택해주세요.")
 
 # [탭 4] 관리자 전용 관리
 if is_admin:
