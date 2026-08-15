@@ -11,12 +11,11 @@ from github.GithubException import UnknownObjectException
 # 1. 페이지 설정
 st.set_page_config(page_title="GBC 연구 논문 DB 관리 시스템", page_icon="📚", layout="wide")
 
-# CSS: 폰트 및 UI 스타일 정의 (내부 폰트 아이콘 텍스트 노출 원천 차단)
+# CSS: 폰트, 가독성, 배지 디자인, 팝업창 UI 전체 개선 및 디버그 텍스트 원천 차단
 custom_css = """
-    <head>
-        <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard/dist/web/static/pretendard.css">
-    </head>
     <style>
+    @import url('https://cdn.jsdelivr.net/gh/orioncactus/pretendard/dist/web/static/pretendard.css');
+    
     html, body, [class*="st-"] {
         font-family: 'Pretendard', 'Noto Sans KR', sans-serif !important;
     }
@@ -25,6 +24,9 @@ custom_css = """
     .stAppDeployButton {display: none;}
     #MainMenu {visibility: hidden;}
     footer {visibility: hidden;}
+    
+    /* 불필요한 시스템 텍스트나 내부 속성 숨기기 */
+    .element-container:empty { display: none; }
     
     div[data-testid="stDialog"] div[role="dialog"] {
         width: 85vw !important;
