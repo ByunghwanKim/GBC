@@ -11,11 +11,13 @@ from github.GithubException import UnknownObjectException
 # 1. 페이지 설정
 st.set_page_config(page_title="GBC 연구 논문 DB 관리 시스템", page_icon="📚", layout="wide")
 
-# CSS: 폰트, 가독성, 배지 디자인, 팝업창 UI 전체 개선 및 시스템 텍스트 원천 차단
+# CSS: 구글 Material Icons 폰트 링크 추가 (텍스트 노출 원천 차단) 및 가독성 개선
 custom_css = """
+    <head>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@24,400,0,0" />
+        <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard/dist/web/static/pretendard.css">
+    </head>
     <style>
-    @import url('https://cdn.jsdelivr.net/gh/orioncactus/pretendard/dist/web/static/pretendard.css');
-    
     html, body, [class*="st-"] {
         font-family: 'Pretendard', 'Noto Sans KR', sans-serif !important;
     }
@@ -24,8 +26,6 @@ custom_css = """
     .stAppDeployButton {display: none;}
     #MainMenu {visibility: hidden;}
     footer {visibility: hidden;}
-    
-    .element-container:empty { display: none; }
     
     div[data-testid="stDialog"] div[role="dialog"] {
         width: 85vw !important;
@@ -231,9 +231,9 @@ def show_detail_dialog(row):
     else:
         st.error("등록된 세부 설문문항 데이터가 없습니다.")
 
-# 2. 사이드바 관리자 인증 (오류 원인인 셀렉트박스 대신 일반 텍스트 입력창으로 깔끔하게 대체)
+# 2. 사이드바 관리자 인증
 st.sidebar.title("🔐 관리자 모드")
-input_pw = st.sidebar.text_input("관리자 비밀번호", type="password", placeholder="비밀번호 입력 후 Enter")
+input_pw = st.sidebar.text_input("관리자 비밀번호", type="password", placeholder="비밀번호 입력")
 is_admin = bool(ADMIN_PASSWORD and input_pw == ADMIN_PASSWORD)
 
 if is_admin:
