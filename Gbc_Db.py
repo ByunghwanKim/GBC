@@ -83,7 +83,6 @@ def get_available_gemini_model():
     )
 
 model = get_available_gemini_model()
-# -----------------------------------------------------------------------------
 
 # GitHub 저장소 설정
 repo = Github(GITHUB_TOKEN).get_repo(GITHUB_REPO)
@@ -133,7 +132,7 @@ def save_master_excel(df, sha):
     else:
         repo.create_file(EXCEL_FILE_PATH, "Create GBC 연구논문 DB", content)
 
-# 팝업 모달창
+# 팝업 모달창 (선택 시 호출됨)
 @st.dialog("📖 연구 논문 상세 분석 리포트", width="large")
 def show_detail_dialog(row):
     st.markdown(f"## 📄 {row.get('논문/도서 제목', '-')}")
@@ -168,7 +167,7 @@ def show_detail_dialog(row):
 
     st.divider()
     
-    st.markdown("### 📝 설문 문항 원문 (영문/국문)")
+    st.markdown("### 📝 측정 척도 및 설문 문항 원문 (영문/국문)")
     survey_content = str(row.get('설문문항', '-'))
     if survey_content and survey_content != "-":
         st.text_area("설문문항 상세 (클릭하여 전체 복사 가능)", value=survey_content, height=350)
@@ -203,6 +202,7 @@ with tabs[0]:
     if master_df.empty:
         st.info("현재 DB에 저장된 논문 데이터가 없습니다. [논문 파일 업로드] 탭에서 논문을 먼저 추가해 보세요.")
     else:
+        # 검색 필터부
         col1, col2 = st.columns([2, 1])
         with col1:
             search_kw = st.text_input("🔎 통합 키워드 검색", placeholder="이론, 변수(IV/DV), 저자, 설문문항, 논문 제목 등")
@@ -220,20 +220,36 @@ with tabs[0]:
             filtered_df = filtered_df[filtered_df["핵심 이론"].str.contains(theory_filter, na=False)]
 
         st.write(f"조회 결과: 총 **{len(filtered_df)}건**")
-        st.info("💡 **팁:** 아래 표에서 맨 왼쪽 열(체크박스)을 선택하시면 대형 팝업 창에서 설문문항을 넓게 보실 수 있습니다.")
-
-        selection_event = st.dataframe(
+        
+        # ---------------------------------------------------------
+        # [핵심 변경] 상단 드롭다운 선택 팝업 방식
+        # ---------------------------------------------------------
+        if not filtered_df.empty:
+            # 논문 번호, 저자, 제목을 조합하여 보기 편한 리스트 생성
+            paper_options = {f"No.{row['No.']} | {row['저자']} ({row['발행 연도']}) - {str(row['논문/도서 제목'])[:50]}...": row['No.'] for _, row in filtered_df.iterrows()}
+            
+            # 셀렉트박스 렌더링
+            st.markdown("##### 🎯 상세 조회 및 설문문항 보기")
+            selected_label = st.selectbox(
+                "아래에서 확인하고 싶은 논문을 선택하시면 대형 창이 열립니다.", 
+                ["선택해 주세요..."] + list(paper_options.keys())
+            )
+            
+            # 논문이 선택되면 팝업 함수 즉시 호출
+            if selected_label != "선택해 주세요...":
+                selected_no = paper_options[selected_label]
+                selected_row = filtered_df[filtered_df['No.'] == selected_no].iloc[0]
+                show_detail_dialog(selected_row)
+        
+        st.markdown("---")
+        st.markdown("##### 📋 전체 논문 목록 테이블 (읽기 전용)")
+        
+        # 체크박스 제거 및 읽기 전용 깔끔한 테이블 렌더링
+        st.dataframe(
             filtered_df, 
             use_container_width=True, 
-            hide_index=True,
-            on_select="rerun",           
-            selection_mode="single-row"  
+            hide_index=True
         )
-        
-        if selection_event.selection.rows:
-            selected_index = selection_event.selection.rows[0]
-            selected_row_data = filtered_df.iloc[selected_index]
-            show_detail_dialog(selected_row_data)
 
 # [탭 2] 논문 파일 업로드 및 분석
 with tabs[1]:
@@ -301,7 +317,6 @@ with tabs[1]:
                             st.warning(f"'{file.name}'에서 텍스트를 읽지 못했습니다. (스캔 이미지 PDF일 수 있음)")
                             continue
 
-                        # [핵심 수정 부분] 척도 제외 지시 추가
                         prompt = f"""
                         당신은 경영학 및 소비자 행동 연구 방법론 최고 전문가입니다.
                         아래 제공된 연구 논문 텍스트를 정밀 분석하여 다음 12개 항목을 JSON 형식으로 추출해주세요.
