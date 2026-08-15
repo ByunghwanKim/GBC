@@ -11,18 +11,77 @@ from github.GithubException import UnknownObjectException
 # 1. 페이지 설정
 st.set_page_config(page_title="GBC 연구 논문 DB 관리 시스템", page_icon="📚", layout="wide")
 
-# CSS: 팝업창 최대화 및 기본 UI 가리기
+# CSS: 폰트, 가독성, 배지(Badge) 디자인, 팝업창 UI 전체 개선
 custom_css = """
     <style>
+    /* 대한민국 웹 표준 최고급 폰트 Pretendard 적용 */
+    @import url('https://cdn.jsdelivr.net/gh/orioncactus/pretendard/dist/web/static/pretendard.css');
+    
+    html, body, [class*="st-"] {
+        font-family: 'Pretendard', 'Noto Sans KR', sans-serif !important;
+    }
+    
     [data-testid="stStatusWidget"] {visibility: hidden;}
     .stAppDeployButton {display: none;}
     #MainMenu {visibility: hidden;}
     footer {visibility: hidden;}
     
+    /* 팝업 모달창 최대화 */
     div[data-testid="stDialog"] div[role="dialog"] {
         width: 85vw !important;
         max-width: 1200px !important;
-        border-radius: 12px;
+        border-radius: 16px;
+    }
+    
+    /* 전체 텍스트 가독성(줄간격, 색상) 향상 */
+    p, li, span, div {
+        line-height: 1.6;
+        color: #1E293B;
+    }
+
+    /* 텍스트 박스(설문문항, 가설) 시인성 극대화 */
+    .stTextArea textarea {
+        font-size: 15px !important;
+        line-height: 1.7 !important;
+        background-color: #F8FAFC !important;
+        color: #0F172A !important;
+        border: 1px solid #CBD5E1 !important;
+        border-radius: 8px !important;
+        padding: 12px !important;
+    }
+    
+    /* 비활성화(disabled)된 텍스트 박스도 흐릿하지 않고 선명하게 보이도록 강제 변경 */
+    .stTextArea textarea:disabled {
+        background-color: #F1F5F9 !important;
+        color: #020617 !important;
+        -webkit-text-fill-color: #020617 !important;
+        opacity: 1 !important;
+        cursor: text !important;
+    }
+
+    /* 연구 변수(IV, DV, Med, Mod) 컬러 배지 디자인 */
+    .badge {
+        display: inline-block;
+        padding: 5px 12px;
+        border-radius: 6px;
+        font-size: 13.5px;
+        font-weight: 700;
+        margin-right: 8px;
+        margin-bottom: 8px;
+        box-shadow: 0 1px 2px rgba(0,0,0,0.05);
+    }
+    .badge-iv { background-color: #EFF6FF; color: #1D4ED8; border: 1px solid #BFDBFE; }
+    .badge-dv { background-color: #FEF2F2; color: #B91C1C; border: 1px solid #FECACA; }
+    .badge-m { background-color: #F0FDF4; color: #15803D; border: 1px solid #BBF7D0; }
+    .badge-mod { background-color: #FFF7ED; color: #C2410C; border: 1px solid #FED7AA; }
+    
+    .var-text { 
+        font-size: 14.5px; 
+        font-weight: 600; 
+        color: #334155; 
+        margin-right: 18px; 
+        display: inline-block;
+        margin-bottom: 8px;
     }
     </style>
 """
@@ -88,7 +147,6 @@ model = get_available_gemini_model()
 repo = Github(GITHUB_TOKEN).get_repo(GITHUB_REPO)
 EXCEL_FILE_PATH = "database/GBC_연구논문_DB.xlsx"
 
-# 14개 표준 컬럼 정의
 DB_COLUMNS = [
     'No.', '저자', '발행 연도', '논문/도서 제목', 
     '학술지명/출처', '핵심 이론', '연구 모형', '가설 정리', 
@@ -96,7 +154,7 @@ DB_COLUMNS = [
     '조절변수(Moderator)', '주요 발견(Key Findings)', '설문문항'
 ]
 
-# GitHub에서 마스터 엑셀 파일 불러오기
+# GitHub 엑셀 로드
 def load_master_excel():
     try:
         file_content = repo.get_contents(EXCEL_FILE_PATH)
@@ -106,10 +164,7 @@ def load_master_excel():
         if '메모' in df.columns and '설문문항' not in df.columns:
             df = df.rename(columns={'메모': '설문문항'})
             
-        drop_targets = [
-            '상태', '권/호', '실무적 시사점', '국내/해외', 
-            '연구 주제/키워드', '메모', '연구 방법론'
-        ]
+        drop_targets = ['상태', '권/호', '실무적 시사점', '국내/해외', '연구 주제/키워드', '메모', '연구 방법론']
         df = df.drop(columns=[col for col in drop_targets if col in df.columns], errors='ignore')
         
         for col in DB_COLUMNS:
@@ -120,7 +175,6 @@ def load_master_excel():
         empty_df = pd.DataFrame(columns=DB_COLUMNS)
         return empty_df, None
 
-# GitHub에 마스터 엑셀 저장
 def save_master_excel(df, sha):
     buffer = io.BytesIO()
     with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
@@ -132,10 +186,10 @@ def save_master_excel(df, sha):
     else:
         repo.create_file(EXCEL_FILE_PATH, "Create GBC 연구논문 DB", content)
 
-# 팝업 모달창
+# 팝업 모달창 (디자인/가독성 대폭 개선)
 @st.dialog("📖 연구 논문 상세 분석 리포트", width="large")
 def show_detail_dialog(row):
-    st.markdown(f"## 📄 {row.get('논문/도서 제목', '-')}")
+    st.markdown(f"### 📄 {row.get('논문/도서 제목', '-')}")
     
     col_m1, col_m2, col_m3 = st.columns([1, 1, 2])
     col_m1.info(f"👤 **저자:** {row.get('저자', '-')}")
@@ -147,32 +201,42 @@ def show_detail_dialog(row):
     col_left, col_right = st.columns(2)
     with col_left:
         st.markdown("#### 💡 핵심 이론")
-        st.markdown(f"> {row.get('핵심 이론', '-')}")
+        st.info(row.get('핵심 이론', '-'))
         
         st.markdown("#### 📊 연구 모형")
-        st.code(row.get('연구 모형', '-'), language=None)
+        st.success(row.get('연구 모형', '-'))
         
-        st.markdown("#### 🔗 변수 구성")
-        st.markdown(f"- **독립변수(IV):** `{row.get('독립변수(IV)', '-')}`")
-        st.markdown(f"- **종속변수(DV):** `{row.get('종속변수(DV)', '-')}`")
-        st.markdown(f"- **매개변수(Mediator):** `{row.get('매개변수(Mediator)', '-')}`")
-        st.markdown(f"- **조절변수(Moderator):** `{row.get('조절변수(Moderator)', '-')}`")
+        st.markdown("#### 🔗 연구 변수 구성")
+        # 팝업 내에서도 깔끔한 뱃지 적용
+        iv = str(row.get('독립변수(IV)', '-')).strip()
+        m = str(row.get('매개변수(Mediator)', '-')).strip()
+        mod = str(row.get('조절변수(Moderator)', '-')).strip()
+        dv = str(row.get('종속변수(DV)', '-')).strip()
+        
+        html_vars = "<div style='line-height:2.0;'>"
+        if iv not in ['-', '']: html_vars += f"<span class='badge badge-iv'>IV (독립)</span> <span class='var-text'>{iv}</span><br>"
+        if m not in ['-', '']: html_vars += f"<span class='badge badge-m'>Med (매개)</span> <span class='var-text'>{m}</span><br>"
+        if mod not in ['-', '']: html_vars += f"<span class='badge badge-mod'>Mod (조절)</span> <span class='var-text'>{mod}</span><br>"
+        if dv not in ['-', '']: html_vars += f"<span class='badge badge-dv'>DV (종속)</span> <span class='var-text'>{dv}</span>"
+        html_vars += "</div>"
+        st.markdown(html_vars, unsafe_allow_html=True)
         
     with col_right:
         st.markdown("#### 📌 가설 체계")
-        st.text_area("가설 정리", value=str(row.get('가설 정리', '-')), height=130, disabled=True)
+        # disabled 텍스트 박스 대신 컨테이너 활용 혹은 CSS 강화된 텍스트 에디터 사용
+        st.text_area("가설 정리 (스크롤 가능)", value=str(row.get('가설 정리', '-')), height=150, disabled=True, label_visibility="collapsed")
         
         st.markdown("#### 🎯 주요 발견 (Key Findings)")
-        st.success(row.get('주요 발견(Key Findings)', '-'))
+        st.warning(row.get('주요 발견(Key Findings)', '-'))
 
     st.divider()
     
-    st.markdown("### 📝 측정 척도 및 설문 문항 원문 (영문/국문)")
+    st.markdown("#### 📝 측정 척도 및 설문 문항 원문")
     survey_content = str(row.get('설문문항', '-'))
     if survey_content and survey_content != "-":
-        st.text_area("설문문항 상세 (클릭하여 전체 복사 가능)", value=survey_content, height=350)
+        st.text_area("설문문항 상세 (클릭하여 텍스트 전체 복사 가능)", value=survey_content, height=450, label_visibility="collapsed")
     else:
-        st.warning("등록된 세부 설문문항 데이터가 없습니다.")
+        st.error("등록된 세부 설문문항 데이터가 없습니다.")
 
 # 2. 사이드바 관리자 인증
 st.sidebar.title("🔐 관리자 모드")
@@ -195,59 +259,77 @@ tabs = st.tabs(tab_names)
 
 # [탭 1] 연구 논문 DB 검색
 with tabs[0]:
-    st.subheader("🔍 연구 논문 DB 검색 및 상세 열람")
+    st.subheader("🔍 연구 논문 DB 다차원 검색")
     
     master_df, _ = load_master_excel()
     
     if master_df.empty:
         st.info("현재 DB에 저장된 논문 데이터가 없습니다. [논문 파일 업로드] 탭에서 논문을 먼저 추가해 보세요.")
     else:
-        # 검색 필터부
-        col1, col2 = st.columns([2, 1])
-        with col1:
-            search_kw = st.text_input("🔎 통합 키워드 검색", placeholder="이론, 변수(IV/DV), 저자, 설문문항, 논문 제목 등")
-        with col2:
-            all_theories = master_df["핵심 이론"].dropna().str.split('\n').explode().str.strip().unique()
-            theory_filter = st.selectbox("💡 핵심 이론별 필터", ["전체 보기"] + [t for t in all_theories if t and t != '-'])
+        # 검색부 UI 개선
+        with st.container(border=True):
+            col1, col2 = st.columns([2, 1])
+            with col1:
+                search_kw = st.text_input("🔎 통합 검색어 입력", placeholder="이론, 변수명, 저자, 논문 제목 (띄어쓰기 무시 적용)")
+            with col2:
+                all_theories = master_df["핵심 이론"].dropna().str.split('\n').explode().str.strip().unique()
+                theory_filter = st.selectbox("💡 핵심 이론별 필터링", ["전체 보기"] + [t for t in all_theories if t and t != '-'])
 
         filtered_df = master_df.copy()
         
+        # 띄어쓰기 완전 무시 검색 로직
         if search_kw.strip():
-            mask = filtered_df.astype(str).apply(lambda x: x.str.contains(search_kw, case=False, na=False)).any(axis=1)
+            kw_clean = search_kw.replace(" ", "").lower()
+            mask = filtered_df.astype(str).apply(
+                lambda col: col.str.replace(" ", "", regex=False).str.lower().str.contains(kw_clean, na=False, regex=False)
+            ).any(axis=1)
             filtered_df = filtered_df[mask]
             
         if theory_filter != "전체 보기":
             filtered_df = filtered_df[filtered_df["핵심 이론"].str.contains(theory_filter, na=False)]
 
-        st.write(f"조회 결과: 총 **{len(filtered_df)}건**")
-        st.markdown("---")
+        st.markdown(f"##### 📌 조회 결과: 총 **{len(filtered_df)}** 건")
         
         # ---------------------------------------------------------
-        # [핵심 변경] 체크박스 달린 표 삭제 -> 직관적인 '카드형 리스트 + 진짜 버튼' 도입
+        # [핵심 변경] 리스트 카드형 UI 및 학술 DB 벤치마킹 뱃지 적용
         # ---------------------------------------------------------
         if filtered_df.empty:
-            st.warning("조건에 맞는 논문이 없습니다.")
+            st.warning("조건에 맞는 논문이 없습니다. 검색어를 변경해 보세요.")
         else:
-            for idx, row in filtered_df.iterrows():
-                # 각각의 논문을 예쁜 박스(Container) 안에 담아 표현
-                with st.container(border=True):
-                    c1, c2 = st.columns([6, 1])
-                    
-                    with c1:
-                        st.markdown(f"##### 📄 {row.get('논문/도서 제목', '-')}")
-                        # 핵심 정보만 컴팩트하게 노출
-                        st.caption(f"👤 **저자:** {row.get('저자', '-')} &nbsp;|&nbsp; 📅 **연도:** {row.get('발행 연도', '-')} &nbsp;|&nbsp; 🏛️ **출처:** {row.get('학술지명/출처', '-')}")
-                        st.caption(f"🎯 **IV:** `{row.get('독립변수(IV)', '-')}` ➡️ **DV:** `{row.get('종속변수(DV)', '-')}`")
+            # 750px 고정 스크롤 영역 적용
+            with st.container(height=750, border=False):
+                for idx, row in filtered_df.iterrows():
+                    with st.container(border=True):
+                        c1, c2 = st.columns([6, 1])
                         
-                    with c2:
-                        st.write("") # 버튼 위아래 여백 맞춤
-                        # 진짜 클릭 가능한 버튼 생성! 누르면 바로 팝업 오픈
-                        if st.button("🔍 상세보기", key=f"btn_detail_{row['No.']}", use_container_width=True):
-                            show_detail_dialog(row)
+                        with c1:
+                            # 논문 메타 정보
+                            st.markdown(f"#### 📄 {row.get('논문/도서 제목', '-')}")
+                            st.markdown(f"<span style='color:#64748B; font-size:14px;'>👤 **{row.get('저자', '-')}** &nbsp;|&nbsp; 📅 **{row.get('발행 연도', '-')}** &nbsp;|&nbsp; 🏛️ **{row.get('학술지명/출처', '-')}**</span>", unsafe_allow_html=True)
+                            
+                            # 벤치마킹된 세련된 변수 배지(Badge) 렌더링
+                            iv = str(row.get('독립변수(IV)', '-')).strip()
+                            m = str(row.get('매개변수(Mediator)', '-')).strip()
+                            mod = str(row.get('조절변수(Moderator)', '-')).strip()
+                            dv = str(row.get('종속변수(DV)', '-')).strip()
+                            
+                            html_vars = "<div style='margin-top: 12px; margin-bottom: 5px;'>"
+                            if iv not in ['-', '']: html_vars += f"<span class='badge badge-iv'>IV (독립)</span><span class='var-text'>{iv}</span>"
+                            if m not in ['-', '']: html_vars += f"<span class='badge badge-m'>Med (매개)</span><span class='var-text'>{m}</span>"
+                            if mod not in ['-', '']: html_vars += f"<span class='badge badge-mod'>Mod (조절)</span><span class='var-text'>{mod}</span>"
+                            if dv not in ['-', '']: html_vars += f"<span class='badge badge-dv'>DV (종속)</span><span class='var-text'>{dv}</span>"
+                            html_vars += "</div>"
+                            
+                            st.markdown(html_vars, unsafe_allow_html=True)
+                            
+                        with c2:
+                            st.write("") 
+                            if st.button("🔍 상세보기\n(설문문항)", key=f"btn_detail_{row['No.']}", use_container_width=True):
+                                show_detail_dialog(row)
 
 # [탭 2] 논문 파일 업로드 및 분석
 with tabs[1]:
-    st.subheader("논문 파일을 업로드 하세요.")
+    st.subheader("🚀 논문 파일을 업로드 하세요.")
     uploaded_files = st.file_uploader(
         "PDF 또는 Excel 파일을 선택하세요 (다중 선택 가능)", 
         type=['pdf', 'xlsx', 'xls'], 
@@ -276,10 +358,7 @@ with tabs[1]:
                             if '메모' in excel_df.columns and '설문문항' not in excel_df.columns:
                                 excel_df = excel_df.rename(columns={'메모': '설문문항'})
                                 
-                            drop_targets = [
-                                '상태', '권/호', '실무적 시사점', '국내/해외', 
-                                '연구 주제/키워드', '메모', '연구 방법론'
-                            ]
+                            drop_targets = ['상태', '권/호', '실무적 시사점', '국내/해외', '연구 주제/키워드', '메모', '연구 방법론']
                             excel_df = excel_df.drop(columns=[col for col in drop_targets if col in excel_df.columns], errors='ignore')
                             
                             for col in DB_COLUMNS:
