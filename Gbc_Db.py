@@ -5,6 +5,8 @@ import io
 import base64
 import html
 import textwrap
+import urllib.parse
+import requests
 import google.generativeai as genai
 from pypdf import PdfReader
 from github import Github
@@ -13,29 +15,12 @@ from github.GithubException import UnknownObjectException
 # 1. 페이지 설정
 st.set_page_config(page_title="GBC 연구 논문 DB 관리 시스템", page_icon="📚", layout="wide")
 
-# CSS: 폰트 및 UI 스타일 정의 (내부 폰트 아이콘 텍스트 노출 원천 차단)
-# [수정] Streamlit의 st.markdown()은 unsafe_allow_html=True를 줘도 내부적으로
-# Markdown 파서(react-markdown)를 거치는데, Markdown 스펙상 "공백 4칸 이상 들여쓰기된 줄"은
-# 코드 블록으로 인식되어 CSS가 적용되지 않고 그대로 텍스트로 화면에 노출된다.
-# 따라서 CSS 문자열은 반드시 왼쪽 정렬(들여쓰기 없음)로 작성하고, textwrap.dedent()로
-# 한 번 더 안전하게 들여쓰기를 제거한다.
 custom_css = textwrap.dedent("""\
 <style>
 @import url('https://cdn.jsdelivr.net/gh/orioncactus/pretendard/dist/web/static/pretendard.css');
 
 html, body, [class*="st-"] {
-font-family: 'Pretendard', 'Noto Sans KR', sans-serif !important;
-}
-
-/* Material Symbols 아이콘(드롭다운 화살표, 비밀번호 눈 아이콘 등)은
-   아이콘 전용 폰트를 유지해야 "visibility", "arrow_drop_down" 같은
-   텍스트가 아이콘 대신 그대로 노출되는 것을 막을 수 있음.
-   [수정] Streamlit 번들에 실제로 로드되는 폰트명은 'Material Symbols Rounded' 임
-   (Outlined가 아님 - 잘못된 폰트명이라 조용히 무시되고 있었음) */
-[data-testid="stIconMaterial"],
-span.material-symbols-outlined,
-span.material-icons {
-font-family: 'Material Symbols Rounded' !important;
+    font-family: 'Pretendard', 'Noto Sans KR', sans-serif !important;
 }
 
 [data-testid="stStatusWidget"] {visibility: hidden;}
@@ -43,196 +28,97 @@ font-family: 'Material Symbols Rounded' !important;
 #MainMenu {visibility: hidden;}
 footer {visibility: hidden;}
 
-/* 불필요한 시스템 텍스트나 내부 속성 숨기기 */
-.element-container:empty { display: none; }
-
-/* ===== [추가] 기본 페이지 - 전체 글자 크기 및 여백 조정 ===== */
-
-/* 본문 기본 폰트: 기본보다 살짝 키워서 가독성 향상 */
-html, body {
-font-size: 16px !important;
+[data-testid="stIconMaterial"],
+span.material-symbols-outlined,
+span.material-icons {
+    font-family: 'Material Symbols Rounded' !important;
 }
 
-/* 페이지 타이틀(st.title) */
-h1 {
-font-size: 2rem !important;
-font-weight: 800 !important;
-}
+html, body { font-size: 16px !important; }
+h1 { font-size: 2rem !important; font-weight: 800 !important; }
+h2 { font-size: 1.4rem !important; font-weight: 700 !important; }
+h3 { font-size: 1.2rem !important; font-weight: 700 !important; }
+h4 { font-size: 1.05rem !important; font-weight: 700 !important; margin-top: 0.4rem !important; margin-bottom: 0.6rem !important; }
 
-/* st.subheader, 카드/다이얼로그 안 소제목(####) */
-h2 {
-font-size: 1.4rem !important;
-font-weight: 700 !important;
-}
-h3 {
-font-size: 1.2rem !important;
-font-weight: 700 !important;
-}
-h4 {
-font-size: 1.05rem !important;
-font-weight: 700 !important;
-margin-top: 0.4rem !important;
-margin-bottom: 0.6rem !important;
-}
+[data-testid="stTab"] p { font-size: 15.5px !important; font-weight: 600 !important; }
+[data-testid="stContainer"] { padding: 4px 2px; }
+[data-testid="stVerticalBlockBorderWrapper"] { border-radius: 14px !important; }
 
-/* 탭 라벨 글자 크기 */
-[data-testid="stTab"] p {
-font-size: 15.5px !important;
-font-weight: 600 !important;
-}
-
-/* 검색 결과 카드(st.container(border=True)) 박스 크기 - 패딩/여백 확대 */
-[data-testid="stContainer"] {
-padding: 4px 2px;
-}
-[data-testid="stVerticalBlockBorderWrapper"] {
-border-radius: 14px !important;
-}
-
-/* 텍스트 입력창 / 셀렉트박스 - 글자 크기, 박스 높이(패딩) 확대 */
-[data-testid="stTextInput"] input,
-[data-testid="stTextInputRootElement"] input {
-font-size: 15.5px !important;
-padding: 10px 14px !important;
+[data-testid="stTextInput"] input, [data-testid="stTextInputRootElement"] input {
+    font-size: 15.5px !important; padding: 10px 14px !important;
 }
 [data-testid="stSelectbox"] div[data-baseweb="select"] {
-font-size: 15.5px !important;
-min-height: 46px !important;
+    font-size: 15.5px !important; min-height: 46px !important;
 }
-
-/* 버튼 - 글자 크기, 박스 패딩 확대 */
 [data-testid="stButton"] button {
-font-size: 15px !important;
-padding: 8px 18px !important;
-border-radius: 8px !important;
+    font-size: 15px !important; padding: 8px 18px !important; border-radius: 8px !important;
 }
-
-/* st.info / st.success / st.warning / st.error 박스 - 글자 크기, 내부 여백 확대 */
 [data-testid="stAlertContainer"] {
-font-size: 15px !important;
-padding: 14px 18px !important;
-border-radius: 10px !important;
+    font-size: 15px !important; padding: 14px 18px !important; border-radius: 10px !important;
 }
 [data-testid="stAlertContainer"] p {
-font-size: 15px !important;
-line-height: 1.6 !important;
+    font-size: 15px !important; line-height: 1.6 !important;
 }
 
 div[data-testid="stDialog"] div[role="dialog"] {
-width: 85vw !important;
-max-width: 1200px !important;
-border-radius: 16px;
-padding: 8px 12px !important;
+    width: 85vw !important; max-width: 1200px !important; border-radius: 16px; padding: 8px 12px !important;
+}
+div[data-testid="stDialog"] p, div[data-testid="stDialog"] li {
+    font-size: 15.5px !important; line-height: 1.7 !important;
 }
 
-/* 상세페이지(다이얼로그) 안 본문/캡션 글자 크기 확대 */
-div[data-testid="stDialog"] p,
-div[data-testid="stDialog"] li {
-font-size: 15.5px !important;
-line-height: 1.7 !important;
-}
-div[data-testid="stDialog"] h3 {
-font-size: 1.35rem !important;
-}
-div[data-testid="stDialog"] h4 {
-font-size: 1.1rem !important;
-}
-
-p, li, span, div {
-line-height: 1.6;
-color: #1E293B;
-}
+p, li, span, div { line-height: 1.6; color: #1E293B; }
 
 .stTextArea textarea {
-font-size: 15.5px !important;
-line-height: 1.75 !important;
-background-color: #F8FAFC !important;
-color: #0F172A !important;
-border: 1px solid #CBD5E1 !important;
-border-radius: 10px !important;
-padding: 14px !important;
+    font-size: 15.5px !important; line-height: 1.75 !important; background-color: #F8FAFC !important;
+    color: #0F172A !important; border: 1px solid #CBD5E1 !important; border-radius: 10px !important; padding: 14px !important;
 }
-
 .stTextArea textarea:disabled {
-background-color: #F1F5F9 !important;
-color: #020617 !important;
--webkit-text-fill-color: #020617 !important;
-opacity: 1 !important;
-cursor: text !important;
+    background-color: #F1F5F9 !important; color: #020617 !important; -webkit-text-fill-color: #020617 !important; opacity: 1 !important; cursor: text !important;
 }
 
 .badge {
-display: inline-block;
-padding: 6px 14px;
-border-radius: 7px;
-font-size: 14px;
-font-weight: 700;
-margin-right: 8px;
-margin-bottom: 8px;
-box-shadow: 0 1px 2px rgba(0,0,0,0.05);
+    display: inline-block; padding: 6px 14px; border-radius: 7px; font-size: 14px; font-weight: 700; margin-right: 8px; margin-bottom: 8px; box-shadow: 0 1px 2px rgba(0,0,0,0.05);
 }
 .badge-iv { background-color: #EFF6FF; color: #1D4ED8; border: 1px solid #BFDBFE; }
 .badge-dv { background-color: #FEF2F2; color: #B91C1C; border: 1px solid #FECACA; }
 .badge-m { background-color: #F0FDF4; color: #15803D; border: 1px solid #BBF7D0; }
 .badge-mod { background-color: #FFF7ED; color: #C2410C; border: 1px solid #FED7AA; }
 
-.var-text {
-font-size: 15px;
-font-weight: 600;
-color: #334155;
-margin-right: 18px;
-display: inline-block;
-margin-bottom: 8px;
-}
+.var-text { font-size: 15px; font-weight: 600; color: #334155; margin-right: 18px; display: inline-block; margin-bottom: 8px; }
 </style>
 """)
 st.markdown(custom_css, unsafe_allow_html=True)
 
-# [수정] secrets.toml 파일 자체가 없는 경우 Streamlit은 KeyError가 아니라
-# StreamlitSecretNotFoundError(구버전은 FileNotFoundError)를 던지므로
-# 넓게 Exception으로 잡아야 안내 메시지가 정상적으로 표시됨
 try:
     GEMINI_API_KEY = st.secrets["GEMINI_API_KEY"]
     GITHUB_TOKEN = st.secrets["GITHUB_TOKEN"]
     GITHUB_REPO = st.secrets["GITHUB_REPO"]
     ADMIN_PASSWORD = st.secrets.get("ADMIN_PASSWORD", "")
+    S2_API_KEY = st.secrets.get("S2_API_KEY", "") # [추가] Semantic Scholar API 키 로드
 except Exception:
-    st.error("⚠️ Streamlit Secrets 설정을 확인해주세요. (GEMINI_API_KEY / GITHUB_TOKEN / GITHUB_REPO)")
+    st.error("⚠️ Streamlit Secrets 설정을 확인해주세요.")
     st.stop()
 
-# -----------------------------------------------------------------------------
-# 🤖 Gemini AI 설정
-# -----------------------------------------------------------------------------
+# Gemini AI 설정
 genai.configure(api_key=GEMINI_API_KEY)
 
 @st.cache_resource
 def get_available_gemini_model():
-    # [수정] 이미 서비스가 종료된 모델(gemini-1.5-*, gemini-2.0-flash)을 제거하고
-    # 최신 안정 모델(gemini-3.6-flash)을 최우선으로 추가
-    preferred_models = [
-        'gemini-3.6-flash',
-        'gemini-3.7-flash',
-        'gemini-3.5-flash',
-        'gemini-3.5-flash-lite',
-        'gemini-2.5-flash',
-        'gemini-2.5-flash-lite',
-    ]
+    preferred_models = ['gemini-3.6-flash', 'gemini-3.7-flash', 'gemini-3.5-flash', 'gemini-2.5-flash']
     try:
         available_models = [
             m.name.replace("models/", "")
             for m in genai.list_models()
             if "generateContent" in m.supported_generation_methods
         ]
-        
         selected_model = None
         for pref in preferred_models:
             if pref in available_models:
                 selected_model = pref
                 break
-                
         if not selected_model and available_models:
             selected_model = available_models[0]
-            
         if selected_model:
             return genai.GenerativeModel(
                 model_name=selected_model,
@@ -240,9 +126,6 @@ def get_available_gemini_model():
             )
     except Exception:
         pass
-    
-    # [수정] list_models() 자체가 실패했을 때 쓰는 최종 폴백도
-    # 서비스 종료된 모델이 아닌 현재 사용 가능한 모델로 교체
     return genai.GenerativeModel(
         model_name='gemini-2.5-flash',
         generation_config={"response_mime_type": "application/json", "temperature": 0.1}
@@ -258,25 +141,17 @@ DB_COLUMNS = [
     'No.', '저자', '발행 연도', '논문/도서 제목', 
     '학술지명/출처', '핵심 이론', '연구 모형', '가설 정리', 
     '독립변수(IV)', '종속변수(DV)', '매개변수(Mediator)', 
-    '조절변수(Moderator)', '주요 발견(Key Findings)', '설문문항',
-    '링크(DOI/URL)'  # [추가] 논문 원문 접근 링크
+    '조절변수(Moderator)', '주요 발견(Key Findings)', '설문문항', '링크(DOI/URL)'
 ]
 
-import urllib.parse
-
 def build_paper_link(row):
-    """[추가] 논문 제목 클릭 시 이동할 링크를 만든다.
-    1) DB에 저장된 DOI/URL이 있으면 그걸 그대로(또는 DOI면 https://doi.org/ 붙여서) 사용
-    2) 없으면 논문 제목으로 Google Scholar 검색 링크를 생성해 최소한 검색은 바로 가게 함"""
     raw = str(row.get('링크(DOI/URL)', '')).strip()
     if raw and raw not in ('-', 'nan', 'None'):
         if raw.startswith('http://') or raw.startswith('https://'):
             return raw, "원문 링크"
-        if raw.startswith('10.'):  # DOI 형식 (예: 10.1086/209231)
+        if raw.startswith('10.'):
             return f"https://doi.org/{raw}", "DOI 링크"
-        # 그 외 형식이면 일단 URL처럼 시도
         return f"https://{raw}", "링크"
-    # 저장된 링크가 없으면 제목 기반 Google Scholar 검색으로 폴백
     title = str(row.get('논문/도서 제목', '')).strip()
     if not title or title in ('-', 'nan', 'None'):
         return None, None
@@ -288,13 +163,10 @@ def load_master_excel():
         file_content = repo.get_contents(EXCEL_FILE_PATH)
         decoded = base64.b64decode(file_content.content)
         df = pd.read_excel(io.BytesIO(decoded))
-        
         if '메모' in df.columns and '설문문항' not in df.columns:
             df = df.rename(columns={'메모': '설문문항'})
-            
         drop_targets = ['상태', '권/호', '실무적 시사점', '국내/해외', '연구 주제/키워드', '메모', '연구 방법론']
         df = df.drop(columns=[col for col in drop_targets if col in df.columns], errors='ignore')
-        
         for col in DB_COLUMNS:
             if col not in df.columns:
                 df[col] = "-"
@@ -308,22 +180,18 @@ def save_master_excel(df, sha):
     with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
         df.to_excel(writer, index=False, sheet_name='Sheet1')
     content = buffer.getvalue()
-    
     if sha:
         repo.update_file(EXCEL_FILE_PATH, "Update GBC 연구논문 DB", content, sha)
     else:
         repo.create_file(EXCEL_FILE_PATH, "Create GBC 연구논문 DB", content)
 
 def normalize_title(title):
-    """[추가] 중복 논문 판별을 위해 제목을 정규화.
-    공백/구두점/대소문자 차이 때문에 같은 논문이 다르게 인식되는 것을 방지."""
     import re
     s = str(title).strip().lower()
-    s = re.sub(r'[^\w가-힣]', '', s)  # 공백, 쉼표, 마침표 등 특수문자 전부 제거
+    s = re.sub(r'[^\w가-힣]', '', s)
     return s
 
 def find_duplicate_no(title, master_df):
-    """제목이 이미 마스터 DB에 존재하면 해당 No.를 반환, 없으면 None."""
     norm_target = normalize_title(title)
     if norm_target == "":
         return None
@@ -334,9 +202,6 @@ def find_duplicate_no(title, master_df):
     return None
 
 def disp(val, default="-"):
-    """[추가] 결측값(NaN/None) 및 빈 문자열을 안전하게 처리해서 화면에 뿌릴 문자열을 만듦.
-    pandas가 빈 셀을 NaN(float)으로 읽어오면 str(NaN) == 'nan'이 되어 화면에 그대로
-    'nan' 텍스트가 노출되는 문제를 막기 위함. 이미 문자열화된 'nan'/'none'도 함께 방어."""
     if pd.isna(val):
         return default
     s = str(val).strip()
@@ -345,9 +210,22 @@ def disp(val, default="-"):
     return s
 
 def safe(text):
-    """[추가] AI가 논문에서 추출한 텍스트를 HTML에 삽입하기 전 이스케이프 처리.
-    <, >, & 등이 원문에 섞여 있어도 뱃지 레이아웃이 깨지지 않도록 함."""
     return html.escape(str(text))
+
+# [수정] S2_API_KEY를 헤더에 포함하여 검색 수행
+def search_semantic_scholar(query, limit=10):
+    url = f"https://api.semanticscholar.org/graph/v1/paper/search?query={urllib.parse.quote(query)}&limit={limit}&fields=title,authors,year,venue,abstract,url,citationCount,isOpenAccess,openAccessPdf"
+    headers = {"User-Agent": "GBC-Research-App/1.0"}
+    if S2_API_KEY:
+        headers["x-api-key"] = S2_API_KEY
+    try:
+        response = requests.get(url, headers=headers, timeout=10)
+        if response.status_code == 200:
+            return response.json()
+        else:
+            return {"error": f"API 오류 (상태 코드: {response.status_code})"}
+    except Exception as e:
+        return {"error": f"네트워크 오류: {str(e)}"}
 
 # 팝업 모달창
 @st.dialog("📖 연구 논문 상세 분석 리포트", width="large")
@@ -409,7 +287,7 @@ def show_detail_dialog(row):
     else:
         st.error("등록된 세부 설문문항 데이터가 없습니다.")
 
-# 2. 사이드바 관리자 인증
+# 사이드바 관리자 인증
 st.sidebar.title("🔐 관리자 모드")
 input_pw = st.sidebar.text_input("관리자 비밀번호", type="password", placeholder="비밀번호 입력")
 is_admin = bool(ADMIN_PASSWORD and input_pw == ADMIN_PASSWORD)
@@ -419,10 +297,10 @@ if is_admin:
 elif input_pw:
     st.sidebar.error("비밀번호가 일치하지 않습니다.")
 
-# 3. 메인 화면 구성
+# 메인 화면 구성
 st.title("📚 GBC 연구 논문 DB 관리 시스템")
 
-tab_names = ["🔍 연구 논문 DB 검색", "🚀 논문 파일 업로드"]
+tab_names = ["🔍 연구 논문 DB 검색", "🌐 Semantic Scholar 검색", "🚀 논문 파일 업로드"]
 if is_admin:
     tab_names.append("⚙️ 관리자 전용 관리 (DB/다운로드)")
 
@@ -449,15 +327,12 @@ with tabs[0]:
         
         if search_kw.strip():
             kw_clean = search_kw.replace(" ", "").lower()
-            # [수정] fillna('')로 결측값을 빈 문자열 처리하여 "nan" 오탐 방지
             mask = filtered_df.fillna("").astype(str).apply(
                 lambda col: col.str.replace(" ", "", regex=False).str.lower().str.contains(kw_clean, na=False, regex=False)
             ).any(axis=1)
             filtered_df = filtered_df[mask]
             
         if theory_filter != "전체 보기":
-            # [수정] regex=False 추가: 이론명에 괄호 등 정규식 특수문자가 있어도
-            # re.error가 나지 않고 정확히 일치하는 부분 문자열만 검색됨
             filtered_df = filtered_df[filtered_df["핵심 이론"].str.contains(theory_filter, na=False, regex=False)]
 
         st.markdown(f"##### 📌 조회 결과: 총 **{len(filtered_df)}** 건")
@@ -500,13 +375,81 @@ with tabs[0]:
                             
                         with c2:
                             st.write("") 
-                            # [수정] key에 데이터프레임 인덱스(idx)를 함께 포함하여
-                            # No. 값이 비어있거나(NaN) 중복되어도 key 충돌이 나지 않도록 함
                             if st.button("🔍 상세보기\n(설문문항)", key=f"btn_detail_{idx}_{row['No.']}", use_container_width=True):
                                 show_detail_dialog(row)
 
-# [탭 2] 논문 파일 업로드 및 분석
+# [탭 2] Semantic Scholar 검색 기능 (S2_API_KEY 적용 완료)
 with tabs[1]:
+    st.subheader("🌐 Semantic Scholar 글로벌 논문 검색")
+    if S2_API_KEY:
+        st.success("🔑 Semantic Scholar API 키가 정상적으로 연동되어 있습니다. (고속 검색 활성화)")
+    else:
+        st.info("💡 Semantic Scholar API 키가 설정되지 않았습니다. 기본 공용 한도로 검색됩니다.")
+
+    with st.container(border=True):
+        s2_query = st.text_input("🔎 Semantic Scholar 검색어 입력", placeholder="예: Technology Acceptance Model, Generative AI advertising 등", key="s2_input_query")
+        s2_limit = st.slider("가져올 결과 수", min_value=5, max_value=30, value=10, step=5)
+
+    if st.button("🚀 Semantic Scholar 검색 실행", type="primary", key="btn_s2_search"):
+        if not s2_query.strip():
+            st.warning("검색어를 입력해주세요.")
+        else:
+            with st.spinner("Semantic Scholar에서 논문을 검색하고 있습니다..."):
+                result_json = search_semantic_scholar(s2_query, limit=s2_limit)
+                st.session_state['s2_last_result'] = result_json
+                st.session_state['s2_queried'] = True
+
+    if st.session_state.get('s2_queried', False):
+        res_data = st.session_state.get('s2_last_result', {})
+        
+        if "error" in res_data:
+            st.error(f"⚠️ 검색 실패: {res_data['error']}")
+        else:
+            papers = res_data.get("data", [])
+            total = res_data.get("total", len(papers))
+            st.markdown(f"##### 📌 Semantic Scholar 검색 결과 (총 {total}건 중 상위 {len(papers)}건 표시)")
+
+            if not papers:
+                st.info("검색된 논문이 없습니다. 다른 키워드로 시도해 보세요.")
+            else:
+                for i, paper in enumerate(papers):
+                    p_title = paper.get("title", "제목 없음")
+                    p_year = paper.get("year", "-")
+                    p_venue = paper.get("venue", "-")
+                    p_citations = paper.get("citationCount", 0)
+                    p_url = paper.get("url", "#")
+                    
+                    authors_list = paper.get("authors", [])
+                    authors_str = ", ".join([a.get("name", "") for a in authors_list]) if authors_list else "저자 정보 없음"
+                    
+                    p_abstract = paper.get("abstract", "초록 정보가 없습니다.")
+                    if not p_abstract:
+                        p_abstract = "초록 정보가 없습니다."
+
+                    pdf_info = paper.get("openAccessPdf")
+                    pdf_url = pdf_info.get("url") if pdf_info else None
+
+                    with st.container(border=True):
+                        st.markdown(f"#### 📄 {p_title}")
+                        st.markdown(f"<span style='color:#64748B; font-size:14.5px;'>👤 **{authors_str}** &nbsp;|&nbsp; 📅 **{p_year}** &nbsp;|&nbsp; 🏛️ 출처: **{p_venue}** &nbsp;|&nbsp; 📈 피인용: **{p_citations}회**</span>", unsafe_allow_html=True)
+                        
+                        with st.expander("📖 초록(Abstract) 및 원문 링크 보기"):
+                            st.write(p_abstract)
+                            st.divider()
+                            c_l1, c_l2, c_l3 = st.columns(3)
+                            with c_l1:
+                                st.markdown(f"🔗 [Semantic Scholar 페이지 보기]({p_url})")
+                            with c_l2:
+                                if pdf_url:
+                                    st.markdown(f"📥 [오픈액세스 PDF 다운로드]({pdf_url})")
+                                else:
+                                    st.caption("📥 오픈액세스 PDF 없음")
+                            with c_l3:
+                                if st.button(f"📋 원본 JSON 보기", key=f"btn_json_{i}_{paper.get('paperId', i)}"):
+                                    st.json(paper)
+
+# [탭 3] 논문 파일 업로드 및 분석
+with tabs[2]:
     st.subheader("🚀 논문 파일을 업로드 하세요.")
     uploaded_files = st.file_uploader(
         "PDF 또는 Excel 파일을 선택하세요 (다중 선택 가능)", 
@@ -514,7 +457,6 @@ with tabs[1]:
         accept_multiple_files=True
     )
 
-    # [추가] 제목이 같은(=이미 DB에 있는) 논문을 만났을 때 처리 방식 선택
     dup_policy = st.radio(
         "🔁 이미 DB에 있는 논문(제목 기준 중복)을 발견하면?",
         ["건너뛰기 (중복 추가 방지)", "기존 항목 덮어쓰기 (내용 업데이트)"],
@@ -532,9 +474,8 @@ with tabs[1]:
                     current_max_no = int(valid_nos.max())
 
             new_entries = []
-            updated_entries = {}  # {No.: row_dict} - 덮어쓰기 대상
-            skipped_titles = []   # 건너뛴(또는 업데이트된) 논문 제목 기록
-            # 이번 배치 안에서 같은 파일들끼리도 중복 체크가 되도록 별도 세트로 추적
+            updated_entries = {}
+            skipped_titles = []
             titles_seen_this_batch = set()
             
             with st.status("🔍 데이터를 처리하고 있습니다...", expanded=True) as status:
@@ -563,9 +504,7 @@ with tabs[1]:
                                 title = row_dict.get('논문/도서 제목', '')
                                 norm_title = normalize_title(title)
 
-                                # [추가] 마스터 DB 기존 항목과 중복 검사
                                 dup_no = find_duplicate_no(title, master_df)
-                                # [추가] 같은 배치 안에서 방금 추가한 항목과도 중복 검사
                                 is_batch_dup = norm_title != "" and norm_title in titles_seen_this_batch
 
                                 if dup_no is not None or is_batch_dup:
@@ -573,7 +512,6 @@ with tabs[1]:
                                         skipped_titles.append(f"{title} (기존 No.{dup_no})" if dup_no else f"{title} (같은 배치 내 중복)")
                                         continue
                                     elif dup_no is not None:
-                                        # 덮어쓰기: 기존 No.를 유지한 채 내용만 갱신
                                         row_dict['No.'] = dup_no
                                         updated_entries[dup_no] = row_dict
                                         skipped_titles.append(f"{title} (No.{dup_no} 업데이트됨)")
@@ -586,8 +524,7 @@ with tabs[1]:
                                     titles_seen_this_batch.add(norm_title)
                                 added_count += 1
                                 
-                            st.write(f"✅ '{file.name}' - {added_count}건 신규 등록 "
-                                     f"(중복 {len(excel_df) - added_count}건 처리)")
+                            st.write(f"✅ '{file.name}' - {added_count}건 신규 등록 (중복 {len(excel_df) - added_count}건 처리)")
                         except Exception as e:
                             st.error(f"'{file.name}' 엑셀 읽기 오류: {str(e)}")
 
@@ -638,7 +575,6 @@ with tabs[1]:
                             pdf_title = res_json.get('title', file.name)
                             norm_title = normalize_title(pdf_title)
 
-                            # [추가] 마스터 DB 기존 항목 및 같은 배치 내 중복 검사
                             dup_no = find_duplicate_no(pdf_title, master_df)
                             is_batch_dup = norm_title != "" and norm_title in titles_seen_this_batch
 
@@ -683,7 +619,6 @@ with tabs[1]:
                 if new_entries or updated_entries:
                     updated_df = master_df.copy()
 
-                    # [추가] 덮어쓰기 대상 반영: 기존 No.에 해당하는 행의 내용을 갱신
                     for dup_no, row_dict in updated_entries.items():
                         mask = updated_df['No.'] == dup_no
                         for k, v in row_dict.items():
@@ -691,7 +626,6 @@ with tabs[1]:
                                 continue
                             updated_df.loc[mask, k] = v
 
-                    # 신규 항목 추가
                     if new_entries:
                         new_df = pd.DataFrame(new_entries)
                         updated_df = pd.concat([updated_df, new_df], ignore_index=True)
@@ -717,9 +651,9 @@ with tabs[1]:
         else:
             st.warning("업로드할 PDF 또는 엑셀 파일을 선택해주세요.")
 
-# [탭 3] 관리자 전용 관리
+# [탭 4] 관리자 전용 관리
 if is_admin:
-    with tabs[2]:
+    with tabs[3]:
         st.subheader("⚙️ 관리자 전용 마스터 DB 관리")
         master_df, sha = load_master_excel()
         
@@ -753,16 +687,12 @@ if is_admin:
 
         st.divider()
 
-        # [추가] 중복 논문 정리 기능
         st.markdown("### 🧹 중복 논문 정리")
-        st.caption("제목(공백·구두점·대소문자 무시)이 같은 논문을 찾아, 각 그룹에서 가장 내용이 "
-                   "충실한(빈 칸이 적은) 항목 하나만 남기고 나머지를 삭제합니다.")
+        st.caption("제목(공백·구두점·대소문자 무시)이 같은 논문을 찾아, 각 그룹에서 가장 내용이 충실한 항목 하나만 남기고 나머지를 삭제합니다.")
 
         def build_dup_plan(df):
-            """중복 그룹을 찾고, 그룹별로 남길 행/지울 행을 결정한 계획(plan)을 만든다."""
             work = df.copy()
             work['_norm_title'] = work['논문/도서 제목'].astype(str).apply(normalize_title)
-            # 필드가 얼마나 채워져 있는지(=충실도) 점수 계산: '-' 나 결측이 아닌 필드 개수
             check_cols = [c for c in DB_COLUMNS if c not in ('No.', '논문/도서 제목')]
             def completeness(row):
                 score = 0
@@ -780,7 +710,6 @@ if is_admin:
             for norm_title, g in groups:
                 if len(g) <= 1:
                     continue
-                # 완성도가 가장 높은 행을 남기고, 동률이면 No.가 가장 작은(먼저 등록된) 행을 남김
                 g_sorted = g.sort_values(by=['_완성도', 'No.'], ascending=[False, True])
                 keep = g_sorted.iloc[0]
                 drops = g_sorted.iloc[1:]
@@ -806,8 +735,7 @@ if is_admin:
             if not previews:
                 st.info("중복으로 판단되는 논문이 없습니다.")
             else:
-                st.warning(f"총 {len(previews)}개 그룹, {len(drop_nos)}건이 삭제 대상입니다. "
-                           f"삭제 전 아래 내용을 꼭 확인해주세요.")
+                st.warning(f"총 {len(previews)}개 그룹, {len(drop_nos)}건이 삭제 대상입니다. 삭제 전 아래 내용을 꼭 확인해주세요.")
                 for p in previews:
                     with st.container(border=True):
                         st.markdown(f"**📄 {p['title']}**")
@@ -816,7 +744,7 @@ if is_admin:
                             st.write(f"🗑️ 삭제 예정: No.{dno} (완성도 {dcomp}개 필드)")
 
                 if st.button("⚠️ 위 목록대로 중복 삭제 실행 (되돌릴 수 없음)", type="primary"):
-                    fresh_df, fresh_sha = load_master_excel()  # 최신 상태 다시 로드 (동시 수정 대비)
+                    fresh_df, fresh_sha = load_master_excel()
                     cleaned = fresh_df[~fresh_df['No.'].isin(drop_nos)].reset_index(drop=True)
                     cleaned['No.'] = range(1, len(cleaned) + 1)
                     save_master_excel(cleaned, fresh_sha)
