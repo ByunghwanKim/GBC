@@ -345,9 +345,9 @@ if is_admin:
 
 tabs = st.tabs(tab_names)
 
-# [탭 1] 연구 논문 DB 검색
+# [탭 1] 연구 논문 DB 검색 (필드 선택형 정밀 검색 적용)
 with tabs[0]:
-    st.subheader("🔍 연구 논문 DB 다차원 검색")
+    st.subheader("🔍 연구 논문 DB 정밀 검색")
     
     master_df, _ = load_master_excel()
     
@@ -355,29 +355,67 @@ with tabs[0]:
         st.info("현재 DB에 저장된 논문 데이터가 없습니다. [논문 파일 업로드] 탭에서 논문을 먼저 추가해 보세요.")
     else:
         with st.container(border=True):
-            col1, col2 = st.columns([2, 1])
-            with col1:
-                search_kw = st.text_input("🔎 통합 검색어 입력", placeholder="이론, 변수명, 저자, 논문 제목 (띄어쓰기 무시 적용)")
-            with col2:
-                all_theories = master_df["핵심 이론"].dropna().str.split('\n').explode().str.strip().unique()
-                theory_filter = st.selectbox("💡 핵심 이론별 필터링", ["전체 보기"] + [t for t in all_theories if t and t != '-'])
+            col_f1, col_f2 = st.columns([1, 2])
+            with col_f1:
+                # 검색 필드 선택 옵션
+                search_field = st.selectbox(
+                    "🎯 검색 필드 선택", 
+                    ["전체 (통합 검색)", "저자", "발행년도", "제목", "변수 (IV/DV/매개/조절)", "가설", "출처", "핵심 이론"]
+                )
+            with col_f2:
+                search_kw = st.text_input("🔎 검색어 입력", placeholder="검색어를 입력하세요 (띄어쓰기 무시 적용)")
 
         filtered_df = master_df.copy()
         
         if search_kw.strip():
             kw_clean = search_kw.replace(" ", "").lower()
-            mask = filtered_df.fillna("").astype(str).apply(
-                lambda col: col.str.replace(" ", "", regex=False).str.lower().str.contains(kw_clean, na=False, regex=False)
-            ).any(axis=1)
-            filtered_df = filtered_df[mask]
             
-        if theory_filter != "전체 보기":
-            filtered_df = filtered_df[filtered_df["핵심 이론"].str.contains(theory_filter, na=False, regex=False)]
+            if search_field == "전체 (통합 검색)":
+                mask = filtered_df.fillna("").astype(str).apply(
+                    lambda col: col.str.replace(" ", "", regex=False).str.lower().str.contains(kw_clean, na=False, regex=False)
+                ).any(axis=1)
+                filtered_df = filtered_df[mask]
+            elif search_field == "저자":
+                target_col = '저자'
+                if target_col in filtered_df.columns:
+                    mask = filtered_df[target_col].fillna("").astype(str).str.replace(" ", "", regex=False).str.lower().str.contains(kw_clean, na=False, regex=False)
+                    filtered_df = filtered_df[mask]
+            elif search_field == "발행년도":
+                target_col = '발행 연도'
+                if target_col in filtered_df.columns:
+                    mask = filtered_df[target_col].fillna("").astype(str).str.replace(" ", "", regex=False).str.lower().str.contains(kw_clean, na=False, regex=False)
+                    filtered_df = filtered_df[mask]
+            elif search_field == "제목":
+                target_col = '논문/도서 제목'
+                if target_col in filtered_df.columns:
+                    mask = filtered_df[target_col].fillna("").astype(str).str.replace(" ", "", regex=False).str.lower().str.contains(kw_clean, na=False, regex=False)
+                    filtered_df = filtered_df[mask]
+            elif search_field == "변수 (IV/DV/매개/조절)":
+                var_cols = ['독립변수(IV)', '종속변수(DV)', '매개변수(Mediator)', '조절변수(Moderator)']
+                mask = filtered_df[var_cols].fillna("").astype(str).apply(
+                    lambda col: col.str.replace(" ", "", regex=False).str.lower().str.contains(kw_clean, na=False, regex=False)
+                ).any(axis=1)
+                filtered_df = filtered_df[mask]
+            elif search_field == "가설":
+                target_col = '가설 정리'
+                if target_col in filtered_df.columns:
+                    mask = filtered_df[target_col].fillna("").astype(str).str.replace(" ", "", regex=False).str.lower().str.contains(kw_clean, na=False, regex=False)
+                    filtered_df = filtered_df[mask]
+            elif search_field == "출처":
+                target_col = '학술지명/출처'
+                if target_col in filtered_df.columns:
+                    mask = filtered_df[target_col].fillna("").astype(str).str.replace(" ", "", regex=False).str.lower().str.contains(kw_clean, na=False, regex=False)
+                    filtered_df = filtered_df[mask]
+            elif search_field == "핵심 이론":
+                target_col = '핵심 이론'
+                if target_col in filtered_df.columns:
+                    mask = filtered_df[target_col].fillna("").astype(str).str.replace(" ", "", regex=False).str.lower().str.contains(kw_clean, na=False, regex=False)
+                    filtered_df = filtered_df[mask]
 
         st.markdown(f"##### 📌 조회 결과: 총 **{len(filtered_df)}** 건")
         
         if filtered_df.empty:
-            st.warning("조건에 맞는 논문이 없습니다. 검색어를 변경해 보세요.")
+            st.warning("조건에 맞는 논문이 없습니다. 검색어 또는 필드를 변경해 보세요.")
         else:
             with st.container(height=750, border=False):
                 for idx, row in filtered_df.iterrows():
@@ -490,13 +528,11 @@ with tabs[1]:
                                 else:
                                     st.caption("📥 오픈액세스 PDF 없음")
 
-# [탭 3] 논문 파일 업로드 및 분석 (모바일 파일 선택 호환성 개편 완료)
+# [탭 3] 논문 파일 업로드 및 분석
 with tabs[2]:
     st.subheader("🚀 논문 파일을 업로드 하세요.")
     st.caption("📂 파일을 올리면 동일 논문 유무를 자동으로 판단하여, 더 충실한 내용으로 스마트 업데이트되거나 신규 등록됩니다.")
     
-    # [수정] 모바일 브라우저(크롬, 사파리 등)에서 PDF 파일이 비활성화되거나 보이지 않는 현상을 해결하기 위해
-    # type 파라미터를 아예 비워두어 모바일 탐색기가 모든 문서 파일을 온전히 열 수 있도록 변경
     uploaded_files = st.file_uploader(
         "PDF 또는 Excel 파일을 선택하세요 (다중 선택 가능)", 
         accept_multiple_files=True,
