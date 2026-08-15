@@ -452,7 +452,7 @@ with tabs[0]:
                             
                         with c2:
                             st.write("") 
-                            if st.button("🔍 상세보기\n(설문문항)", key=f"btn_detail_{idx}_{row['No.']}", use_container_width=True):
+                            if st.button("🔍 상세보기", key=f"btn_detail_{idx}_{row['No.']}", use_container_width=True):
                                 show_detail_dialog(row)
 
 # [탭 2] Semantic Scholar 검색 기능
