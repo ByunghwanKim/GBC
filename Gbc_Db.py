@@ -3,6 +3,8 @@ import pandas as pd
 import json
 import io
 import base64
+import html
+import textwrap
 import google.generativeai as genai
 from pypdf import PdfReader
 from github import Github
@@ -11,86 +13,103 @@ from github.GithubException import UnknownObjectException
 # 1. 페이지 설정
 st.set_page_config(page_title="GBC 연구 논문 DB 관리 시스템", page_icon="📚", layout="wide")
 
-# CSS: 폰트, 가독성, 배지 디자인, 팝업창 UI 전체 개선 및 디버그 텍스트 원천 차단
-custom_css = """
-    <style>
-    @import url('https://cdn.jsdelivr.net/gh/orioncactus/pretendard/dist/web/static/pretendard.css');
-    
-    html, body, [class*="st-"] {
-        font-family: 'Pretendard', 'Noto Sans KR', sans-serif !important;
-    }
-    
-    [data-testid="stStatusWidget"] {visibility: hidden;}
-    .stAppDeployButton {display: none;}
-    #MainMenu {visibility: hidden;}
-    footer {visibility: hidden;}
-    
-    /* 불필요한 시스템 텍스트나 내부 속성 숨기기 */
-    .element-container:empty { display: none; }
-    
-    div[data-testid="stDialog"] div[role="dialog"] {
-        width: 85vw !important;
-        max-width: 1200px !important;
-        border-radius: 16px;
-    }
-    
-    p, li, span, div {
-        line-height: 1.6;
-        color: #1E293B;
-    }
+# CSS: 폰트 및 UI 스타일 정의 (내부 폰트 아이콘 텍스트 노출 원천 차단)
+# [수정] Streamlit의 st.markdown()은 unsafe_allow_html=True를 줘도 내부적으로
+# Markdown 파서(react-markdown)를 거치는데, Markdown 스펙상 "공백 4칸 이상 들여쓰기된 줄"은
+# 코드 블록으로 인식되어 CSS가 적용되지 않고 그대로 텍스트로 화면에 노출된다.
+# 따라서 CSS 문자열은 반드시 왼쪽 정렬(들여쓰기 없음)로 작성하고, textwrap.dedent()로
+# 한 번 더 안전하게 들여쓰기를 제거한다.
+custom_css = textwrap.dedent("""\
+<style>
+@import url('https://cdn.jsdelivr.net/gh/orioncactus/pretendard/dist/web/static/pretendard.css');
 
-    .stTextArea textarea {
-        font-size: 15px !important;
-        line-height: 1.7 !important;
-        background-color: #F8FAFC !important;
-        color: #0F172A !important;
-        border: 1px solid #CBD5E1 !important;
-        border-radius: 8px !important;
-        padding: 12px !important;
-    }
-    
-    .stTextArea textarea:disabled {
-        background-color: #F1F5F9 !important;
-        color: #020617 !important;
-        -webkit-text-fill-color: #020617 !important;
-        opacity: 1 !important;
-        cursor: text !important;
-    }
+html, body, [class*="st-"] {
+font-family: 'Pretendard', 'Noto Sans KR', sans-serif !important;
+}
 
-    .badge {
-        display: inline-block;
-        padding: 5px 12px;
-        border-radius: 6px;
-        font-size: 13.5px;
-        font-weight: 700;
-        margin-right: 8px;
-        margin-bottom: 8px;
-        box-shadow: 0 1px 2px rgba(0,0,0,0.05);
-    }
-    .badge-iv { background-color: #EFF6FF; color: #1D4ED8; border: 1px solid #BFDBFE; }
-    .badge-dv { background-color: #FEF2F2; color: #B91C1C; border: 1px solid #FECACA; }
-    .badge-m { background-color: #F0FDF4; color: #15803D; border: 1px solid #BBF7D0; }
-    .badge-mod { background-color: #FFF7ED; color: #C2410C; border: 1px solid #FED7AA; }
-    
-    .var-text { 
-        font-size: 14.5px; 
-        font-weight: 600; 
-        color: #334155; 
-        margin-right: 18px; 
-        display: inline-block;
-        margin-bottom: 8px;
-    }
-    </style>
-"""
+/* Material Symbols 아이콘(드롭다운 화살표, 비밀번호 눈 아이콘 등)은
+   아이콘 전용 폰트를 유지해야 "visibility", "arrow_drop_down" 같은
+   텍스트가 아이콘 대신 그대로 노출되는 것을 막을 수 있음 */
+[data-testid="stIconMaterial"],
+span.material-symbols-outlined,
+span.material-icons {
+font-family: 'Material Symbols Outlined' !important;
+}
+
+[data-testid="stStatusWidget"] {visibility: hidden;}
+.stAppDeployButton {display: none;}
+#MainMenu {visibility: hidden;}
+footer {visibility: hidden;}
+
+/* 불필요한 시스템 텍스트나 내부 속성 숨기기 */
+.element-container:empty { display: none; }
+
+div[data-testid="stDialog"] div[role="dialog"] {
+width: 85vw !important;
+max-width: 1200px !important;
+border-radius: 16px;
+}
+
+p, li, span, div {
+line-height: 1.6;
+color: #1E293B;
+}
+
+.stTextArea textarea {
+font-size: 15px !important;
+line-height: 1.7 !important;
+background-color: #F8FAFC !important;
+color: #0F172A !important;
+border: 1px solid #CBD5E1 !important;
+border-radius: 8px !important;
+padding: 12px !important;
+}
+
+.stTextArea textarea:disabled {
+background-color: #F1F5F9 !important;
+color: #020617 !important;
+-webkit-text-fill-color: #020617 !important;
+opacity: 1 !important;
+cursor: text !important;
+}
+
+.badge {
+display: inline-block;
+padding: 5px 12px;
+border-radius: 6px;
+font-size: 13.5px;
+font-weight: 700;
+margin-right: 8px;
+margin-bottom: 8px;
+box-shadow: 0 1px 2px rgba(0,0,0,0.05);
+}
+.badge-iv { background-color: #EFF6FF; color: #1D4ED8; border: 1px solid #BFDBFE; }
+.badge-dv { background-color: #FEF2F2; color: #B91C1C; border: 1px solid #FECACA; }
+.badge-m { background-color: #F0FDF4; color: #15803D; border: 1px solid #BBF7D0; }
+.badge-mod { background-color: #FFF7ED; color: #C2410C; border: 1px solid #FED7AA; }
+
+.var-text {
+font-size: 14.5px;
+font-weight: 600;
+color: #334155;
+margin-right: 18px;
+display: inline-block;
+margin-bottom: 8px;
+}
+</style>
+""")
 st.markdown(custom_css, unsafe_allow_html=True)
 
+# [수정] secrets.toml 파일 자체가 없는 경우 Streamlit은 KeyError가 아니라
+# StreamlitSecretNotFoundError(구버전은 FileNotFoundError)를 던지므로
+# 넓게 Exception으로 잡아야 안내 메시지가 정상적으로 표시됨
 try:
     GEMINI_API_KEY = st.secrets["GEMINI_API_KEY"]
     GITHUB_TOKEN = st.secrets["GITHUB_TOKEN"]
     GITHUB_REPO = st.secrets["GITHUB_REPO"]
     ADMIN_PASSWORD = st.secrets.get("ADMIN_PASSWORD", "")
-except KeyError:
-    st.error("⚠️ Streamlit Secrets 설정을 확인해주세요.")
+except Exception:
+    st.error("⚠️ Streamlit Secrets 설정을 확인해주세요. (GEMINI_API_KEY / GITHUB_TOKEN / GITHUB_REPO)")
     st.stop()
 
 # -----------------------------------------------------------------------------
@@ -100,14 +119,15 @@ genai.configure(api_key=GEMINI_API_KEY)
 
 @st.cache_resource
 def get_available_gemini_model():
+    # [수정] 이미 서비스가 종료된 모델(gemini-1.5-*, gemini-2.0-flash)을 제거하고
+    # 최신 안정 모델(gemini-3.6-flash)을 최우선으로 추가
     preferred_models = [
+        'gemini-3.6-flash',
         'gemini-3.7-flash',
         'gemini-3.5-flash',
         'gemini-3.5-flash-lite',
         'gemini-2.5-flash',
-        'gemini-2.0-flash',
-        'gemini-1.5-flash-latest',
-        'gemini-1.5-flash'
+        'gemini-2.5-flash-lite',
     ]
     try:
         available_models = [
@@ -133,8 +153,10 @@ def get_available_gemini_model():
     except Exception:
         pass
     
+    # [수정] list_models() 자체가 실패했을 때 쓰는 최종 폴백도
+    # 서비스 종료된 모델이 아닌 현재 사용 가능한 모델로 교체
     return genai.GenerativeModel(
-        model_name='gemini-1.5-flash',
+        model_name='gemini-2.5-flash',
         generation_config={"response_mime_type": "application/json", "temperature": 0.1}
     )
 
@@ -182,6 +204,11 @@ def save_master_excel(df, sha):
     else:
         repo.create_file(EXCEL_FILE_PATH, "Create GBC 연구논문 DB", content)
 
+def safe(text):
+    """[추가] AI가 논문에서 추출한 텍스트를 HTML에 삽입하기 전 이스케이프 처리.
+    <, >, & 등이 원문에 섞여 있어도 뱃지 레이아웃이 깨지지 않도록 함."""
+    return html.escape(str(text))
+
 # 팝업 모달창
 @st.dialog("📖 연구 논문 상세 분석 리포트", width="large")
 def show_detail_dialog(row):
@@ -209,10 +236,10 @@ def show_detail_dialog(row):
         dv = str(row.get('종속변수(DV)', '-')).strip()
         
         html_vars = "<div style='line-height:2.0;'>"
-        if iv not in ['-', '']: html_vars += f"<span class='badge badge-iv'>IV (독립)</span> <span class='var-text'>{iv}</span><br>"
-        if m not in ['-', '']: html_vars += f"<span class='badge badge-m'>Med (매개)</span> <span class='var-text'>{m}</span><br>"
-        if mod not in ['-', '']: html_vars += f"<span class='badge badge-mod'>Mod (조절)</span> <span class='var-text'>{mod}</span><br>"
-        if dv not in ['-', '']: html_vars += f"<span class='badge badge-dv'>DV (종속)</span> <span class='var-text'>{dv}</span>"
+        if iv not in ['-', '']: html_vars += f"<span class='badge badge-iv'>IV</span> <span class='var-text'>{safe(iv)}</span><br>"
+        if m not in ['-', '']: html_vars += f"<span class='badge badge-m'>Med</span> <span class='var-text'>{safe(m)}</span><br>"
+        if mod not in ['-', '']: html_vars += f"<span class='badge badge-mod'>Mod</span> <span class='var-text'>{safe(mod)}</span><br>"
+        if dv not in ['-', '']: html_vars += f"<span class='badge badge-dv'>DV</span> <span class='var-text'>{safe(dv)}</span>"
         html_vars += "</div>"
         st.markdown(html_vars, unsafe_allow_html=True)
         
@@ -272,13 +299,16 @@ with tabs[0]:
         
         if search_kw.strip():
             kw_clean = search_kw.replace(" ", "").lower()
-            mask = filtered_df.astype(str).apply(
+            # [수정] fillna('')로 결측값을 빈 문자열 처리하여 "nan" 오탐 방지
+            mask = filtered_df.fillna("").astype(str).apply(
                 lambda col: col.str.replace(" ", "", regex=False).str.lower().str.contains(kw_clean, na=False, regex=False)
             ).any(axis=1)
             filtered_df = filtered_df[mask]
             
         if theory_filter != "전체 보기":
-            filtered_df = filtered_df[filtered_df["핵심 이론"].str.contains(theory_filter, na=False)]
+            # [수정] regex=False 추가: 이론명에 괄호 등 정규식 특수문자가 있어도
+            # re.error가 나지 않고 정확히 일치하는 부분 문자열만 검색됨
+            filtered_df = filtered_df[filtered_df["핵심 이론"].str.contains(theory_filter, na=False, regex=False)]
 
         st.markdown(f"##### 📌 조회 결과: 총 **{len(filtered_df)}** 건")
         
@@ -292,7 +322,7 @@ with tabs[0]:
                         
                         with c1:
                             st.markdown(f"#### 📄 {row.get('논문/도서 제목', '-')}")
-                            st.markdown(f"<span style='color:#64748B; font-size:14px;'>👤 **{row.get('저자', '-')}** &nbsp;|&nbsp; 📅 **{row.get('발행 연도', '-')}** &nbsp;|&nbsp; 🏛️ **{row.get('학술지명/출처', '-')}**</span>", unsafe_allow_html=True)
+                            st.markdown(f"<span style='color:#64748B; font-size:14px;'>👤 **{safe(row.get('저자', '-'))}** &nbsp;|&nbsp; 📅 **{safe(row.get('발행 연도', '-'))}** &nbsp;|&nbsp; 🏛️ **{safe(row.get('학술지명/출처', '-'))}**</span>", unsafe_allow_html=True)
                             
                             iv = str(row.get('독립변수(IV)', '-')).strip()
                             m = str(row.get('매개변수(Mediator)', '-')).strip()
@@ -300,17 +330,19 @@ with tabs[0]:
                             dv = str(row.get('종속변수(DV)', '-')).strip()
                             
                             html_vars = "<div style='margin-top: 12px; margin-bottom: 5px;'>"
-                            if iv not in ['-', '']: html_vars += f"<span class='badge badge-iv'>IV (독립)</span><span class='var-text'>{iv}</span>"
-                            if m not in ['-', '']: html_vars += f"<span class='badge badge-m'>Med (매개)</span><span class='var-text'>{m}</span>"
-                            if mod not in ['-', '']: html_vars += f"<span class='badge badge-mod'>Mod (조절)</span><span class='var-text'>{mod}</span>"
-                            if dv not in ['-', '']: html_vars += f"<span class='badge badge-dv'>DV (종속)</span><span class='var-text'>{dv}</span>"
+                            if iv not in ['-', '']: html_vars += f"<span class='badge badge-iv'>IV</span><span class='var-text'>{safe(iv)}</span>"
+                            if m not in ['-', '']: html_vars += f"<span class='badge badge-m'>Med</span><span class='var-text'>{safe(m)}</span>"
+                            if mod not in ['-', '']: html_vars += f"<span class='badge badge-mod'>Mod</span><span class='var-text'>{safe(mod)}</span>"
+                            if dv not in ['-', '']: html_vars += f"<span class='badge badge-dv'>DV</span><span class='var-text'>{safe(dv)}</span>"
                             html_vars += "</div>"
                             
                             st.markdown(html_vars, unsafe_allow_html=True)
                             
                         with c2:
                             st.write("") 
-                            if st.button("🔍 상세보기\n(설문문항)", key=f"btn_detail_{row['No.']}", use_container_width=True):
+                            # [수정] key에 데이터프레임 인덱스(idx)를 함께 포함하여
+                            # No. 값이 비어있거나(NaN) 중복되어도 key 충돌이 나지 않도록 함
+                            if st.button("🔍 상세보기\n(설문문항)", key=f"btn_detail_{idx}_{row['No.']}", use_container_width=True):
                                 show_detail_dialog(row)
 
 # [탭 2] 논문 파일 업로드 및 분석
