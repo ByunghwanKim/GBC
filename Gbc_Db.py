@@ -11,7 +11,7 @@ from github.GithubException import UnknownObjectException
 # 1. 페이지 설정
 st.set_page_config(page_title="GBC 연구 논문 DB 관리 시스템", page_icon="📚", layout="wide")
 
-# CSS: 폰트, 가독성, 배지 디자인, 팝업창 UI 전체 개선 및 디버그 텍스트 원천 차단
+# CSS: 폰트, 가독성, 배지 디자인, 팝업창 UI 전체 개선 및 시스템 텍스트 원천 차단
 custom_css = """
     <style>
     @import url('https://cdn.jsdelivr.net/gh/orioncactus/pretendard/dist/web/static/pretendard.css');
@@ -25,7 +25,6 @@ custom_css = """
     #MainMenu {visibility: hidden;}
     footer {visibility: hidden;}
     
-    /* 불필요한 시스템 텍스트나 내부 속성 숨기기 */
     .element-container:empty { display: none; }
     
     div[data-testid="stDialog"] div[role="dialog"] {
@@ -232,9 +231,9 @@ def show_detail_dialog(row):
     else:
         st.error("등록된 세부 설문문항 데이터가 없습니다.")
 
-# 2. 사이드바 관리자 인증
+# 2. 사이드바 관리자 인증 (오류 원인인 셀렉트박스 대신 일반 텍스트 입력창으로 깔끔하게 대체)
 st.sidebar.title("🔐 관리자 모드")
-input_pw = st.sidebar.text_input("관리자 비밀번호", type="password", placeholder="비밀번호 입력")
+input_pw = st.sidebar.text_input("관리자 비밀번호", type="password", placeholder="비밀번호 입력 후 Enter")
 is_admin = bool(ADMIN_PASSWORD and input_pw == ADMIN_PASSWORD)
 
 if is_admin:
