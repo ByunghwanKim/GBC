@@ -7,6 +7,7 @@ import html
 import textwrap
 import urllib.parse
 import requests
+import datetime
 import google.generativeai as genai
 from pypdf import PdfReader
 from github import Github
@@ -95,7 +96,7 @@ try:
     GITHUB_TOKEN = st.secrets["GITHUB_TOKEN"]
     GITHUB_REPO = st.secrets["GITHUB_REPO"]
     ADMIN_PASSWORD = st.secrets.get("ADMIN_PASSWORD", "")
-    S2_API_KEY = st.secrets.get("S2_API_KEY", "") # [추가] Semantic Scholar API 키 로드
+    S2_API_KEY = st.secrets.get("S2_API_KEY", "")
 except Exception:
     st.error("⚠️ Streamlit Secrets 설정을 확인해주세요.")
     st.stop()
@@ -212,9 +213,27 @@ def disp(val, default="-"):
 def safe(text):
     return html.escape(str(text))
 
-# [수정] S2_API_KEY를 헤더에 포함하여 검색 수행
-def search_semantic_scholar(query, limit=10):
+# Semantic Scholar 검색 함수 (연도 필터 추가 지원)
+def search_semantic_scholar(query, limit=10, year_range="전체 기간"):
     url = f"https://api.semanticscholar.org/graph/v1/paper/search?query={urllib.parse.quote(query)}&limit={limit}&fields=title,authors,year,venue,abstract,url,citationCount,isOpenAccess,openAccessPdf"
+    
+    # 연도 필터 적용
+    if year_range != "전체 기간":
+        current_year = datetime.datetime.now().year
+        if "5년" in year_range:
+            start_year = current_year - 5
+        elif "10년" in year_range:
+            start_year = current_year - 10
+        elif "15년" in year_range:
+            start_year = current_year - 15
+        elif "20년" in year_range:
+            start_year = current_year - 20
+        else:
+            start_year = None
+            
+        if start_year:
+            url += f"&year={start_year}-{current_year}"
+
     headers = {"User-Agent": "GBC-Research-App/1.0"}
     if S2_API_KEY:
         headers["x-api-key"] = S2_API_KEY
@@ -378,24 +397,26 @@ with tabs[0]:
                             if st.button("🔍 상세보기\n(설문문항)", key=f"btn_detail_{idx}_{row['No.']}", use_container_width=True):
                                 show_detail_dialog(row)
 
-# [탭 2] Semantic Scholar 검색 기능 (S2_API_KEY 적용 완료)
+# [탭 2] Semantic Scholar 검색 기능 (결과 수/연도 필터 유동적 조절, 원문 이동 버튼 추가)
 with tabs[1]:
     st.subheader("🌐 Semantic Scholar 글로벌 논문 검색")
-    if S2_API_KEY:
-        st.success("🔑 Semantic Scholar API 키가 정상적으로 연동되어 있습니다. (고속 검색 활성화)")
-    else:
-        st.info("💡 Semantic Scholar API 키가 설정되지 않았습니다. 기본 공용 한도로 검색됩니다.")
 
     with st.container(border=True):
         s2_query = st.text_input("🔎 Semantic Scholar 검색어 입력", placeholder="예: Technology Acceptance Model, Generative AI advertising 등", key="s2_input_query")
-        s2_limit = st.slider("가져올 결과 수", min_value=5, max_value=30, value=10, step=5)
+        
+        # [추가] 유동적 결과 수 및 연도 필터 셀렉트박스
+        col_f1, col_f2 = st.columns(2)
+        with col_f1:
+            s2_limit = st.selectbox("📊 가져올 결과 수", [5, 10, 15, 20, 30], index=1)
+        with col_f2:
+            s2_year_range = st.selectbox("📅 검색 연도 범위", ["전체 기간", "최근 5년", "최근 10년", "최근 15년", "최근 20년"], index=0)
 
     if st.button("🚀 Semantic Scholar 검색 실행", type="primary", key="btn_s2_search"):
         if not s2_query.strip():
             st.warning("검색어를 입력해주세요.")
         else:
             with st.spinner("Semantic Scholar에서 논문을 검색하고 있습니다..."):
-                result_json = search_semantic_scholar(s2_query, limit=s2_limit)
+                result_json = search_semantic_scholar(s2_query, limit=s2_limit, year_range=s2_year_range)
                 st.session_state['s2_last_result'] = result_json
                 st.session_state['s2_queried'] = True
 
@@ -436,17 +457,14 @@ with tabs[1]:
                         with st.expander("📖 초록(Abstract) 및 원문 링크 보기"):
                             st.write(p_abstract)
                             st.divider()
-                            c_l1, c_l2, c_l3 = st.columns(3)
+                            c_l1, c_l2 = st.columns(2)
                             with c_l1:
-                                st.markdown(f"🔗 [Semantic Scholar 페이지 보기]({p_url})")
+                                st.markdown(f"🔗 [Semantic Scholar 원문 페이지 바로가기]({p_url})", unsafe_allow_html=True)
                             with c_l2:
                                 if pdf_url:
-                                    st.markdown(f"📥 [오픈액세스 PDF 다운로드]({pdf_url})")
+                                    st.markdown(f"📥 [오픈액세스 PDF 다운로드]({pdf_url})", unsafe_allow_html=True)
                                 else:
-                                    st.caption("📥 오픈액세스 PDF 없음")
-                            with c_l3:
-                                if st.button(f"📋 원본 JSON 보기", key=f"btn_json_{i}_{paper.get('paperId', i)}"):
-                                    st.json(paper)
+                                    st.caption("📥 오픈액세스 PDF 링크 없음")
 
 # [탭 3] 논문 파일 업로드 및 분석
 with tabs[2]:
