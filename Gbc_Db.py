@@ -193,15 +193,26 @@ def normalize_title(title):
     s = re.sub(r'[^\w가-힣]', '', s)
     return s
 
-def find_duplicate_no(title, master_df):
+def find_duplicate_row(title, master_df):
+    """제목이 일치하는 기존 행 전체를 반환"""
     norm_target = normalize_title(title)
     if norm_target == "":
         return None
     existing_norms = master_df['논문/도서 제목'].astype(str).apply(normalize_title)
     match = master_df[existing_norms == norm_target]
     if not match.empty:
-        return match.iloc[0]['No.']
+        return match.iloc[0]
     return None
+
+def calculate_completeness(row):
+    """행의 데이터 완성도 점수 계산 (결측이나 '-'가 아닌 필드 개수)"""
+    check_cols = [c for c in DB_COLUMNS if c not in ('No.', '논문/도서 제목')]
+    score = 0
+    for c in check_cols:
+        v = row.get(c, None)
+        if pd.notna(v) and str(v).strip() not in ('-', ''):
+            score += 1
+    return score
 
 def disp(val, default="-"):
     if pd.isna(val):
@@ -214,7 +225,6 @@ def disp(val, default="-"):
 def safe(text):
     return html.escape(str(text))
 
-# [수정] 429 에러 대응 자동 재시도(Retry) 로직이 포함된 Semantic Scholar 검색 함수
 def search_semantic_scholar(query, limit=10, year_range="전체 기간", max_retries=2):
     url = f"https://api.semanticscholar.org/graph/v1/paper/search?query={urllib.parse.quote(query)}&limit={limit}&fields=title,authors,year,venue,abstract,url,citationCount,isOpenAccess,openAccessPdf"
     
@@ -245,7 +255,7 @@ def search_semantic_scholar(query, limit=10, year_range="전체 기간", max_ret
                 return response.json()
             elif response.status_code == 429:
                 if attempt < max_retries:
-                    time.sleep(2.0) # 2초 대기 후 재시도
+                    time.sleep(2.0)
                     continue
                 else:
                     return {"error": "API 요청 한도 초과 (429 Too Many Requests). 잠시 후 다시 시도해 주세요."}
@@ -482,20 +492,15 @@ with tabs[1]:
                                 else:
                                     st.caption("📥 오픈액세스 PDF 없음")
 
-# [탭 3] 논문 파일 업로드 및 분석
+# [탭 3] 논문 파일 업로드 및 분석 (스마트 검증 및 히든 중복 처리 적용)
 with tabs[2]:
     st.subheader("🚀 논문 파일을 업로드 하세요.")
+    st.caption("📂 파일을 올리면 동일 논문 유무를 자동으로 판단하여, 더 충실한 내용으로 스마트 업데이트되거나 신규 등록됩니다.")
+    
     uploaded_files = st.file_uploader(
         "PDF 또는 Excel 파일을 선택하세요 (다중 선택 가능)", 
         type=['pdf', 'xlsx', 'xls'], 
         accept_multiple_files=True
-    )
-
-    dup_policy = st.radio(
-        "🔁 이미 DB에 있는 논문(제목 기준 중복)을 발견하면?",
-        ["건너뛰기 (중복 추가 방지)", "기존 항목 덮어쓰기 (내용 업데이트)"],
-        horizontal=True,
-        help="같은 논문 PDF/엑셀을 다시 올렸을 때 새 행으로 중복 추가되는 것을 막기 위한 옵션입니다."
     )
     
     if st.button("파일 처리 및 마스터 DB에 누적 저장", type="primary"):
@@ -509,10 +514,10 @@ with tabs[2]:
 
             new_entries = []
             updated_entries = {}
-            skipped_titles = []
+            processed_logs = []
             titles_seen_this_batch = set()
             
-            with st.status("🔍 데이터를 처리하고 있습니다...", expanded=True) as status:
+            with st.status("🔍 데이터를 스마트 분석하고 있습니다...", expanded=True) as status:
                 for idx, file in enumerate(uploaded_files):
                     file_ext = file.name.split('.')[-1].lower()
                     
@@ -532,33 +537,38 @@ with tabs[2]:
                                     
                             excel_df = excel_df[DB_COLUMNS]
                             
-                            added_count = 0
                             for _, row in excel_df.iterrows():
                                 row_dict = row.to_dict()
                                 title = row_dict.get('논문/도서 제목', '')
                                 norm_title = normalize_title(title)
 
-                                dup_no = find_duplicate_no(title, master_df)
-                                is_batch_dup = norm_title != "" and norm_title in titles_seen_this_batch
+                                if norm_title != "" and norm_title in titles_seen_this_batch:
+                                    processed_logs.append(f"⏭️ [배지 중복 건너뜀] {title}")
+                                    continue
 
-                                if dup_no is not None or is_batch_dup:
-                                    if dup_policy.startswith("건너뛰기"):
-                                        skipped_titles.append(f"{title} (기존 No.{dup_no})" if dup_no else f"{title} (같은 배치 내 중복)")
-                                        continue
-                                    elif dup_no is not None:
-                                        row_dict['No.'] = dup_no
-                                        updated_entries[dup_no] = row_dict
-                                        skipped_titles.append(f"{title} (No.{dup_no} 업데이트됨)")
-                                        continue
+                                existing_row = find_duplicate_row(title, master_df)
+                                if existing_row is not None:
+                                    existing_no = existing_row['No.']
+                                    # 스마트 검증: 새로 들어온 데이터의 완성도 vs 기존 데이터의 완성도 비교
+                                    old_score = calculate_completeness(existing_row)
+                                    new_score = calculate_completeness(row_dict)
+
+                                    if new_score > old_score:
+                                        row_dict['No.'] = existing_no
+                                        updated_entries[existing_no] = row_dict
+                                        processed_logs.append(f"🔄 [스마트 업데이트] No.{existing_no} '{title}' (기존 완성도 {old_score} ➔ 신규 {new_score})")
+                                    else:
+                                        processed_logs.append(f"⏭️ [기존 정보가 더 충실하여 유지] '{title}'")
+                                    continue
 
                                 current_max_no += 1
                                 row_dict['No.'] = current_max_no
                                 new_entries.append(row_dict)
                                 if norm_title:
                                     titles_seen_this_batch.add(norm_title)
-                                added_count += 1
-                                
-                            st.write(f"✅ '{file.name}' - {added_count}건 신규 등록 (중복 {len(excel_df) - added_count}건 처리)")
+                                processed_logs.append(f"✅ [신규 등록] No.{current_max_no} '{title}'")
+
+                            st.write(f"✅ '{file.name}' 엑셀 처리 완료!")
                         except Exception as e:
                             st.error(f"'{file.name}' 엑셀 읽기 오류: {str(e)}")
 
@@ -609,8 +619,9 @@ with tabs[2]:
                             pdf_title = res_json.get('title', file.name)
                             norm_title = normalize_title(pdf_title)
 
-                            dup_no = find_duplicate_no(pdf_title, master_df)
-                            is_batch_dup = norm_title != "" and norm_title in titles_seen_this_batch
+                            if norm_title != "" and norm_title in titles_seen_this_batch:
+                                processed_logs.append(f"⏭️ [배지 중복 건너뜀] {pdf_title}")
+                                continue
 
                             entry = {
                                 '저자': res_json.get('authors', '-'),
@@ -629,24 +640,27 @@ with tabs[2]:
                                 '링크(DOI/URL)': res_json.get('doi_or_url', '-')
                             }
 
-                            if dup_no is not None or is_batch_dup:
-                                if dup_policy.startswith("건너뛰기"):
-                                    skipped_titles.append(f"{pdf_title} (기존 No.{dup_no})" if dup_no else f"{pdf_title} (같은 배치 내 중복)")
-                                    st.write(f"⏭️ '{file.name}' — 이미 DB에 있는 논문이라 건너뜀 (제목: {pdf_title})")
-                                    continue
-                                elif dup_no is not None:
-                                    entry['No.'] = dup_no
-                                    updated_entries[dup_no] = entry
-                                    skipped_titles.append(f"{pdf_title} (No.{dup_no} 업데이트됨)")
-                                    st.write(f"🔄 '{file.name}' — 기존 No.{dup_no} 항목 업데이트")
-                                    continue
+                            existing_row = find_duplicate_row(pdf_title, master_df)
+                            if existing_row is not None:
+                                existing_no = existing_row['No.']
+                                old_score = calculate_completeness(existing_row)
+                                new_score = calculate_completeness(entry)
+
+                                if new_score > old_score:
+                                    entry['No.'] = existing_no
+                                    updated_entries[existing_no] = entry
+                                    processed_logs.append(f"🔄 [스마트 업데이트] No.{existing_no} '{pdf_title}' (기존 완성도 {old_score} ➔ 신규 {new_score})")
+                                else:
+                                    processed_logs.append(f"⏭️ [기존 정보가 더 충실하여 유지] '{pdf_title}'")
+                                continue
 
                             current_max_no += 1
                             entry['No.'] = current_max_no
                             new_entries.append(entry)
                             if norm_title:
                                 titles_seen_this_batch.add(norm_title)
-                            st.write(f"✅ '{file.name}' 분석 완료! (신규 등록)")
+                            processed_logs.append(f"✅ [신규 등록] No.{current_max_no} '{pdf_title}'")
+                            st.write(f"✅ '{file.name}' 분석 완료!")
                         except Exception as e:
                             st.error(f"'{file.name}' 분석 중 오류: {str(e)}")
 
@@ -665,23 +679,22 @@ with tabs[2]:
                         updated_df = pd.concat([updated_df, new_df], ignore_index=True)
 
                     save_master_excel(updated_df, sha)
-                    status.update(label="전체 파일 처리 및 DB 저장 완료!", state="complete", expanded=False)
+                    status.update(label="전체 파일 처리 및 스마트 DB 저장 완료!", state="complete", expanded=False)
 
-                    msg = f"신규 등록 {len(new_entries)}건"
-                    if updated_entries:
-                        msg += f", 기존 항목 업데이트 {len(updated_entries)}건"
-                    if skipped_titles:
-                        msg += f", 중복 처리 {len(skipped_titles)}건"
-                    st.success(msg)
+                    st.success(f"신규 등록 {len(new_entries)}건, 스마트 업데이트 {len(updated_entries)}건이 완료되었습니다.")
+                    
+                    with st.expander("📋 상세 처리 결과 로그 보기"):
+                        for log in processed_logs:
+                            st.write(log)
 
                     if new_entries:
                         st.dataframe(pd.DataFrame(new_entries), use_container_width=True)
-                    if skipped_titles:
-                        with st.expander(f"🔁 중복으로 처리된 {len(skipped_titles)}건 보기"):
-                            for t in skipped_titles:
-                                st.write(f"- {t}")
                 else:
-                    status.update(label="추출/병합된 데이터 없음", state="error")
+                    status.update(label="추출/병합된 데이터 없음 (또는 모두 기존 정보가 더 우수함)", state="error")
+                    if processed_logs:
+                        with st.expander("📋 상세 처리 결과 로그 보기"):
+                            for log in processed_logs:
+                                st.write(log)
         else:
             st.warning("업로드할 PDF 또는 엑셀 파일을 선택해주세요.")
 
