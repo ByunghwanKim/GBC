@@ -8,7 +8,7 @@ from pypdf import PdfReader
 from github import Github
 from github.GithubException import UnknownObjectException
 
-# 1. 페이지 설정 (화면 전체 너비 활용)
+# 1. 페이지 설정
 st.set_page_config(page_title="GBC 연구 논문 DB 관리 시스템", page_icon="📚", layout="wide")
 
 # CSS: 팝업창 최대화 및 기본 UI 가리기
@@ -19,7 +19,6 @@ custom_css = """
     #MainMenu {visibility: hidden;}
     footer {visibility: hidden;}
     
-    /* 팝업 모달(Dialog)을 최대한 넓게 사용 */
     div[data-testid="stDialog"] div[role="dialog"] {
         width: 85vw !important;
         max-width: 1200px !important;
@@ -39,15 +38,12 @@ except KeyError:
     st.stop()
 
 # -----------------------------------------------------------------------------
-# 🤖 Gemini AI 설정 (3.7 / 3.5 최우선 탐색 로직)
+# 🤖 Gemini AI 설정
 # -----------------------------------------------------------------------------
 genai.configure(api_key=GEMINI_API_KEY)
 
 @st.cache_resource
 def get_available_gemini_model():
-    """API 키를 통해 사용 가능한 최신 모델을 자동 검색하여 반환"""
-    
-    # 우선순위: 3.7 -> 3.5 -> 2.0 -> 1.5 순으로 가장 강력한 버전을 먼저 시도합니다.
     preferred_models = [
         'gemini-3.7-flash',
         'gemini-3.5-flash',
@@ -58,21 +54,18 @@ def get_available_gemini_model():
         'gemini-1.5-flash'
     ]
     try:
-        # 계정에서 사용 가능한 모델 목록 조회
         available_models = [
             m.name.replace("models/", "")
             for m in genai.list_models()
             if "generateContent" in m.supported_generation_methods
         ]
         
-        # 선호 모델 우선순위대로 매칭
         selected_model = None
         for pref in preferred_models:
             if pref in available_models:
                 selected_model = pref
                 break
                 
-        # 선호 모델이 없으면 리스트의 첫 번째 지원 모델 사용
         if not selected_model and available_models:
             selected_model = available_models[0]
             
@@ -84,7 +77,6 @@ def get_available_gemini_model():
     except Exception:
         pass
     
-    # 위 과정에서 모두 실패 시 사용하는 최후의 하드코딩 대체 모델
     return genai.GenerativeModel(
         model_name='gemini-1.5-flash',
         generation_config={"response_mime_type": "application/json", "temperature": 0.1}
@@ -97,7 +89,7 @@ model = get_available_gemini_model()
 repo = Github(GITHUB_TOKEN).get_repo(GITHUB_REPO)
 EXCEL_FILE_PATH = "database/GBC_연구논문_DB.xlsx"
 
-# 14개 정예 표준 컬럼 정의
+# 14개 표준 컬럼 정의
 DB_COLUMNS = [
     'No.', '저자', '발행 연도', '논문/도서 제목', 
     '학술지명/출처', '핵심 이론', '연구 모형', '가설 정리', 
@@ -141,7 +133,7 @@ def save_master_excel(df, sha):
     else:
         repo.create_file(EXCEL_FILE_PATH, "Create GBC 연구논문 DB", content)
 
-# 팝업 모달창 (화면 중앙 집중형 초대형 뷰어)
+# 팝업 모달창
 @st.dialog("📖 연구 논문 상세 분석 리포트", width="large")
 def show_detail_dialog(row):
     st.markdown(f"## 📄 {row.get('논문/도서 제목', '-')}")
@@ -176,8 +168,7 @@ def show_detail_dialog(row):
 
     st.divider()
     
-    # 초대형 설문문항 영역 (복사 용이)
-    st.markdown("### 📝 측정 척도 및 설문 문항 원문 (영문/국문)")
+    st.markdown("### 📝 설문 문항 원문 (영문/국문)")
     survey_content = str(row.get('설문문항', '-'))
     if survey_content and survey_content != "-":
         st.text_area("설문문항 상세 (클릭하여 전체 복사 가능)", value=survey_content, height=350)
@@ -231,7 +222,6 @@ with tabs[0]:
         st.write(f"조회 결과: 총 **{len(filtered_df)}건**")
         st.info("💡 **팁:** 아래 표에서 맨 왼쪽 열(체크박스)을 선택하시면 대형 팝업 창에서 설문문항을 넓게 보실 수 있습니다.")
 
-        # 테이블에서 행(Row) 클릭 시 팝업을 띄우는 핵심 로직
         selection_event = st.dataframe(
             filtered_df, 
             use_container_width=True, 
@@ -240,7 +230,6 @@ with tabs[0]:
             selection_mode="single-row"  
         )
         
-        # 행이 선택된 경우 팝업 다이얼로그 호출
         if selection_event.selection.rows:
             selected_index = selection_event.selection.rows[0]
             selected_row_data = filtered_df.iloc[selected_index]
@@ -312,10 +301,11 @@ with tabs[1]:
                             st.warning(f"'{file.name}'에서 텍스트를 읽지 못했습니다. (스캔 이미지 PDF일 수 있음)")
                             continue
 
+                        # [핵심 수정 부분] 척도 제외 지시 추가
                         prompt = f"""
                         당신은 경영학 및 소비자 행동 연구 방법론 최고 전문가입니다.
                         아래 제공된 연구 논문 텍스트를 정밀 분석하여 다음 12개 항목을 JSON 형식으로 추출해주세요.
-                        특히, 연구 방법론(Methodology) 및 부록(Appendix)을 꼼꼼히 살펴 변수별 측정 문항과 척도를 'survey_items'에 상세히 기재하세요.
+                        특히, 연구 방법론(Methodology) 및 부록(Appendix)을 꼼꼼히 살펴 변수별 측정 문항을 'survey_items'에 상세히 기재하세요. (주의: 5점 척도, 7점 척도 등 점수 체계에 대한 설명은 절대 포함하지 말고 오직 문항만 작성하세요.)
                         
                         추출 형식(JSON):
                         {{
@@ -331,7 +321,7 @@ with tabs[1]:
                             "mediator": "매개변수(Mediator, 없으면 '-')",
                             "moderator": "조절변수(Moderator, 없으면 '-')",
                             "findings": "주요 발견(Key Findings)",
-                            "survey_items": "변수별 측정 척도 유형 및 실제 측정에 사용된 설문 문항 원문(영문/국문 번역 병기)을 줄바꿈하여 구체적으로 작성"
+                            "survey_items": "변수별 측정에 사용된 실제 설문 문항 원문(영문/국문 번역 병기)만을 줄바꿈하여 작성 (척도/점수 체계 제외)"
                         }}
 
                         [논문 원문 텍스트]:
