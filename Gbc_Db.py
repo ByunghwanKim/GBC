@@ -132,7 +132,7 @@ def save_master_excel(df, sha):
     else:
         repo.create_file(EXCEL_FILE_PATH, "Create GBC 연구논문 DB", content)
 
-# 팝업 모달창 (클릭 시 호출됨)
+# 팝업 모달창
 @st.dialog("📖 연구 논문 상세 분석 리포트", width="large")
 def show_detail_dialog(row):
     st.markdown(f"## 📄 {row.get('논문/도서 제목', '-')}")
@@ -218,36 +218,29 @@ with tabs[0]:
             
         if theory_filter != "전체 보기":
             filtered_df = filtered_df[filtered_df["핵심 이론"].str.contains(theory_filter, na=False)]
+            
+        # ---------------------------------------------------------
+        # [핵심 변경] 표 맨 앞에 '🔍 보기' 열(버튼 역할) 추가
+        # ---------------------------------------------------------
+        if not filtered_df.empty:
+            filtered_df.insert(0, '🔍 상세', '🔍 보기')
 
         st.write(f"조회 결과: 총 **{len(filtered_df)}건**")
-        st.info("💡 **팁:** 표 왼쪽의 **체크박스**를 누르시면 대형 팝업 창에서 설문문항을 넓게 보실 수 있습니다.")
+        st.info("💡 **팁:** 표 맨 왼쪽 열을 클릭하시면 해당 논문의 대형 팝업 리포트가 열립니다.")
         
-        # ---------------------------------------------------------
-        # [에러 완벽 해결] 동적 Key를 사용하여 체크박스 강제 초기화
-        # ---------------------------------------------------------
-        # 1. 테이블 리셋을 위한 키(Key) 카운터 생성
-        if "table_reset_key" not in st.session_state:
-            st.session_state.table_reset_key = 0
-
-        # 2. 고유 키에 카운터를 붙여서 표 렌더링
+        # 에러를 방지하기 위해 순수하게 선택 이벤트만 감지 (강제 초기화 로직 제거)
         selection_event = st.dataframe(
             filtered_df, 
             use_container_width=True, 
             hide_index=True,
             on_select="rerun",
-            selection_mode="single-row",
-            key=f"paper_table_{st.session_state.table_reset_key}" 
+            selection_mode="single-row"
         )
         
-        # 3. 행이 체크(선택)된 경우
+        # 클릭 이벤트 처리
         if selection_event.selection.rows:
             selected_index = selection_event.selection.rows[0]
             selected_row_data = filtered_df.iloc[selected_index]
-            
-            # 창을 닫고 돌아왔을 때 표가 초기화(체크 해제)되도록 카운터를 1 증가시킴!
-            st.session_state.table_reset_key += 1
-            
-            # 모달 다이얼로그 호출
             show_detail_dialog(selected_row_data)
 
 # [탭 2] 논문 파일 업로드 및 분석
@@ -374,6 +367,8 @@ with tabs[1]:
                     save_master_excel(updated_df, sha)
                     status.update(label="전체 파일 처리 및 DB 누적 저장 완료!", state="complete", expanded=False)
                     st.success(f"총 {len(new_entries)}건의 연구 데이터가 'GBC_연구논문_DB'에 완벽하게 누적되었습니다.")
+                    
+                    # 업로드 탭에서도 보기 좋게 렌더링
                     st.dataframe(new_df, use_container_width=True)
                 else:
                     status.update(label="추출/병합된 데이터 없음", state="error")
