@@ -326,7 +326,7 @@ def show_detail_dialog(row):
     else:
         st.error("등록된 세부 설문문항 데이터가 없습니다.")
 
-# [추가] Semantic Scholar 초록 한글 번역 팝업 모달창
+# Semantic Scholar 초록 한글 번역 팝업 모달창
 @st.dialog("🇰🇷 Semantic Scholar 논문 초록 한글 번역", width="large")
 def show_s2_abstract_dialog(title, abstract):
     st.markdown(f"### 📄 {safe(title)}")
@@ -483,7 +483,7 @@ with tabs[0]:
                             if st.button("🔍 상세보기", key=f"btn_detail_{idx}_{row['No.']}", use_container_width=True):
                                 show_detail_dialog(row)
 
-# [탭 2] Semantic Scholar 검색 기능 (한글 초록 번역 버튼 추가)
+# [탭 2] Semantic Scholar 검색 기능 (PDF 유무와 상관없이 한글 초록 버튼 항상 노출)
 with tabs[1]:
     st.subheader("🌐 Semantic Scholar 글로벌 논문 검색")
 
@@ -559,7 +559,7 @@ with tabs[1]:
                                         st.caption("📥 오픈액세스 PDF 없음")
                         with c_card2:
                             st.write("")
-                            # [추가] 한글 초록 번역 보기 버튼
+                            # [수정] PDF 유무와 상관없이 항상 노출되는 한글 초록 번역 버튼
                             if st.button("🇰🇷 한글 초록\n번역 보기", key=f"btn_trans_{i}_{paper.get('paperId', i)}", use_container_width=True):
                                 show_s2_abstract_dialog(p_title, p_abstract)
 
