@@ -241,8 +241,8 @@ with tabs[0]:
                 selected_index = selected_rows[0]
                 selected_row_data = filtered_df.iloc[selected_index]
                 
-                # 창을 닫았을 때 체크가 풀려있도록 Session State 강제 초기화
-                st.session_state.paper_table_selection["selection"]["rows"] = []
+                # [오류 해결] 내부를 직접 수정하지 않고, 선택 상태 딕셔너리 전체를 빈 값으로 덮어씌움
+                st.session_state.paper_table_selection = {"selection": {"rows": [], "columns": []}}
                 
                 # 모달 다이얼로그 호출
                 show_detail_dialog(selected_row_data)
