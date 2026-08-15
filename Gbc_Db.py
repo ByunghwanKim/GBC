@@ -258,8 +258,30 @@ DB_COLUMNS = [
     'No.', '저자', '발행 연도', '논문/도서 제목', 
     '학술지명/출처', '핵심 이론', '연구 모형', '가설 정리', 
     '독립변수(IV)', '종속변수(DV)', '매개변수(Mediator)', 
-    '조절변수(Moderator)', '주요 발견(Key Findings)', '설문문항'
+    '조절변수(Moderator)', '주요 발견(Key Findings)', '설문문항',
+    '링크(DOI/URL)'  # [추가] 논문 원문 접근 링크
 ]
+
+import urllib.parse
+
+def build_paper_link(row):
+    """[추가] 논문 제목 클릭 시 이동할 링크를 만든다.
+    1) DB에 저장된 DOI/URL이 있으면 그걸 그대로(또는 DOI면 https://doi.org/ 붙여서) 사용
+    2) 없으면 논문 제목으로 Google Scholar 검색 링크를 생성해 최소한 검색은 바로 가게 함"""
+    raw = str(row.get('링크(DOI/URL)', '')).strip()
+    if raw and raw not in ('-', 'nan', 'None'):
+        if raw.startswith('http://') or raw.startswith('https://'):
+            return raw, "원문 링크"
+        if raw.startswith('10.'):  # DOI 형식 (예: 10.1086/209231)
+            return f"https://doi.org/{raw}", "DOI 링크"
+        # 그 외 형식이면 일단 URL처럼 시도
+        return f"https://{raw}", "링크"
+    # 저장된 링크가 없으면 제목 기반 Google Scholar 검색으로 폴백
+    title = str(row.get('논문/도서 제목', '')).strip()
+    if not title or title in ('-', 'nan', 'None'):
+        return None, None
+    query = urllib.parse.quote(title)
+    return f"https://scholar.google.com/scholar?q={query}", "Google Scholar 검색"
 
 def load_master_excel():
     try:
@@ -330,7 +352,17 @@ def safe(text):
 # 팝업 모달창
 @st.dialog("📖 연구 논문 상세 분석 리포트", width="large")
 def show_detail_dialog(row):
-    st.markdown(f"### 📄 {disp(row.get('논문/도서 제목'))}")
+    _title = disp(row.get('논문/도서 제목'))
+    _link, _link_label = build_paper_link(row)
+    if _link:
+        st.markdown(
+            f"### 📄 {safe(_title)} "
+            f"<a href='{_link}' target='_blank' rel='noopener noreferrer' "
+            f"style='font-size:0.6em; text-decoration:none;'>🔗 {safe(_link_label)}</a>",
+            unsafe_allow_html=True
+        )
+    else:
+        st.markdown(f"### 📄 {_title}")
     
     col_m1, col_m2, col_m3 = st.columns([1, 1, 2])
     col_m1.info(f"👤 **저자:** {disp(row.get('저자'))}")
@@ -439,7 +471,17 @@ with tabs[0]:
                         c1, c2 = st.columns([6, 1])
                         
                         with c1:
-                            st.markdown(f"#### 📄 {disp(row.get('논문/도서 제목'))}")
+                            _title = disp(row.get('논문/도서 제목'))
+                            _link, _link_label = build_paper_link(row)
+                            if _link:
+                                st.markdown(
+                                    f"#### 📄 {safe(_title)} "
+                                    f"<a href='{_link}' target='_blank' rel='noopener noreferrer' "
+                                    f"style='font-size:0.55em; text-decoration:none;'>🔗 {safe(_link_label)}</a>",
+                                    unsafe_allow_html=True
+                                )
+                            else:
+                                st.markdown(f"#### 📄 {_title}")
                             st.markdown(f"<span style='color:#64748B; font-size:15px;'>👤 **{safe(disp(row.get('저자')))}** &nbsp;|&nbsp; 📅 **{safe(disp(row.get('발행 연도')))}** &nbsp;|&nbsp; 🏛️ **{safe(disp(row.get('학술지명/출처')))}**</span>", unsafe_allow_html=True)
                             
                             iv = disp(row.get('독립변수(IV)'))
@@ -564,7 +606,7 @@ with tabs[1]:
 
                         prompt = f"""
                         당신은 경영학 및 소비자 행동 연구 방법론 최고 전문가입니다.
-                        아래 제공된 연구 논문 텍스트를 정밀 분석하여 다음 12개 항목을 JSON 형식으로 추출해주세요.
+                        아래 제공된 연구 논문 텍스트를 정밀 분석하여 다음 13개 항목을 JSON 형식으로 추출해주세요.
                         특히, 연구 방법론(Methodology) 및 부록(Appendix)을 꼼꼼히 살펴 변수별 측정 문항을 'survey_items'에 상세히 기재하세요. (주의: 5점 척도, 7점 척도 등 점수 체계에 대한 설명은 절대 포함하지 말고 오직 문항만 작성하세요.)
                         
                         추출 형식(JSON):
@@ -581,7 +623,8 @@ with tabs[1]:
                             "mediator": "매개변수(Mediator, 없으면 '-')",
                             "moderator": "조절변수(Moderator, 없으면 '-')",
                             "findings": "주요 발견(Key Findings)",
-                            "survey_items": "변수별 측정에 사용된 실제 설문 문항 원문(영문/국문 번역 병기)만을 줄바꿈하여 작성 (척도/점수 체계 제외)"
+                            "survey_items": "변수별 측정에 사용된 실제 설문 문항 원문(영문/국문 번역 병기)만을 줄바꿈하여 작성 (척도/점수 체계 제외)",
+                            "doi_or_url": "논문 원문에 표기된 DOI(예: 10.1086/209231) 또는 접근 가능한 URL. 없으면 '-'"
                         }}
 
                         [논문 원문 텍스트]:
@@ -612,7 +655,8 @@ with tabs[1]:
                                 '매개변수(Mediator)': res_json.get('mediator', '-'),
                                 '조절변수(Moderator)': res_json.get('moderator', '-'),
                                 '주요 발견(Key Findings)': res_json.get('findings', '-'),
-                                '설문문항': res_json.get('survey_items', '-')
+                                '설문문항': res_json.get('survey_items', '-'),
+                                '링크(DOI/URL)': res_json.get('doi_or_url', '-')
                             }
 
                             if dup_no is not None or is_batch_dup:
