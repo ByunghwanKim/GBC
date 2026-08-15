@@ -132,7 +132,7 @@ def save_master_excel(df, sha):
     else:
         repo.create_file(EXCEL_FILE_PATH, "Create GBC 연구논문 DB", content)
 
-# 팝업 모달창 (선택 시 호출됨)
+# 팝업 모달창 (클릭 시 호출됨)
 @st.dialog("📖 연구 논문 상세 분석 리포트", width="large")
 def show_detail_dialog(row):
     st.markdown(f"## 📄 {row.get('논문/도서 제목', '-')}")
@@ -220,36 +220,24 @@ with tabs[0]:
             filtered_df = filtered_df[filtered_df["핵심 이론"].str.contains(theory_filter, na=False)]
 
         st.write(f"조회 결과: 총 **{len(filtered_df)}건**")
+        st.info("💡 **팁:** 아래 표에서 원하시는 논문의 **아무 곳(제목, 저자 등)**이나 한 번만 클릭하시면 즉시 대형 창이 열립니다.")
         
         # ---------------------------------------------------------
-        # [핵심 변경] 상단 드롭다운 선택 팝업 방식
+        # [핵심 변경] 표(Dataframe) 직접 클릭 방식 복구
         # ---------------------------------------------------------
-        if not filtered_df.empty:
-            # 논문 번호, 저자, 제목을 조합하여 보기 편한 리스트 생성
-            paper_options = {f"No.{row['No.']} | {row['저자']} ({row['발행 연도']}) - {str(row['논문/도서 제목'])[:50]}...": row['No.'] for _, row in filtered_df.iterrows()}
-            
-            # 셀렉트박스 렌더링
-            st.markdown("##### 🎯 상세 조회 및 설문문항 보기")
-            selected_label = st.selectbox(
-                "아래에서 확인하고 싶은 논문을 선택하시면 대형 창이 열립니다.", 
-                ["선택해 주세요..."] + list(paper_options.keys())
-            )
-            
-            # 논문이 선택되면 팝업 함수 즉시 호출
-            if selected_label != "선택해 주세요...":
-                selected_no = paper_options[selected_label]
-                selected_row = filtered_df[filtered_df['No.'] == selected_no].iloc[0]
-                show_detail_dialog(selected_row)
-        
-        st.markdown("---")
-        st.markdown("##### 📋 전체 논문 목록 테이블 (읽기 전용)")
-        
-        # 체크박스 제거 및 읽기 전용 깔끔한 테이블 렌더링
-        st.dataframe(
+        selection_event = st.dataframe(
             filtered_df, 
             use_container_width=True, 
-            hide_index=True
+            hide_index=True,
+            on_select="rerun",           # 행 클릭 시 팝업을 위한 화면 갱신
+            selection_mode="single-row"  # 단일 행 클릭 활성화
         )
+        
+        # 행이 선택된 경우 팝업 다이얼로그 호출
+        if selection_event.selection.rows:
+            selected_index = selection_event.selection.rows[0]
+            selected_row_data = filtered_df.iloc[selected_index]
+            show_detail_dialog(selected_row_data)
 
 # [탭 2] 논문 파일 업로드 및 분석
 with tabs[1]:
