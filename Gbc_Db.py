@@ -4,6 +4,7 @@ import json
 import io
 import base64
 import html
+import textwrap
 import google.generativeai as genai
 from pypdf import PdfReader
 from github import Github
@@ -13,83 +14,86 @@ from github.GithubException import UnknownObjectException
 st.set_page_config(page_title="GBC 연구 논문 DB 관리 시스템", page_icon="📚", layout="wide")
 
 # CSS: 폰트 및 UI 스타일 정의 (내부 폰트 아이콘 텍스트 노출 원천 차단)
-custom_css = """
-    <head>
-        <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard/dist/web/static/pretendard.css">
-    </head>
-    <style>
-    html, body, [class*="st-"] {
-        font-family: 'Pretendard', 'Noto Sans KR', sans-serif !important;
-    }
+# [수정] Streamlit의 st.markdown()은 unsafe_allow_html=True를 줘도 내부적으로
+# Markdown 파서(react-markdown)를 거치는데, Markdown 스펙상 "공백 4칸 이상 들여쓰기된 줄"은
+# 코드 블록으로 인식되어 CSS가 적용되지 않고 그대로 텍스트로 화면에 노출된다.
+# 따라서 CSS 문자열은 반드시 왼쪽 정렬(들여쓰기 없음)로 작성하고, textwrap.dedent()로
+# 한 번 더 안전하게 들여쓰기를 제거한다.
+custom_css = textwrap.dedent("""\
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard/dist/web/static/pretendard.css">
+<style>
+html, body, [class*="st-"] {
+font-family: 'Pretendard', 'Noto Sans KR', sans-serif !important;
+}
 
-    /* [수정] Material Symbols 아이콘(드롭다운 화살표, 비밀번호 눈 아이콘 등)은
-       아이콘 전용 폰트를 유지해야 "visibility", "arrow_drop_down" 같은
-       텍스트가 아이콘 대신 그대로 노출되는 것을 막을 수 있음 */
-    [data-testid="stIconMaterial"],
-    span.material-symbols-outlined,
-    span.material-icons {
-        font-family: 'Material Symbols Outlined' !important;
-    }
-    
-    [data-testid="stStatusWidget"] {visibility: hidden;}
-    .stAppDeployButton {display: none;}
-    #MainMenu {visibility: hidden;}
-    footer {visibility: hidden;}
-    
-    div[data-testid="stDialog"] div[role="dialog"] {
-        width: 85vw !important;
-        max-width: 1200px !important;
-        border-radius: 16px;
-    }
-    
-    p, li, span, div {
-        line-height: 1.6;
-        color: #1E293B;
-    }
+/* Material Symbols 아이콘(드롭다운 화살표, 비밀번호 눈 아이콘 등)은
+   아이콘 전용 폰트를 유지해야 "visibility", "arrow_drop_down" 같은
+   텍스트가 아이콘 대신 그대로 노출되는 것을 막을 수 있음 */
+[data-testid="stIconMaterial"],
+span.material-symbols-outlined,
+span.material-icons {
+font-family: 'Material Symbols Outlined' !important;
+}
 
-    .stTextArea textarea {
-        font-size: 15px !important;
-        line-height: 1.7 !important;
-        background-color: #F8FAFC !important;
-        color: #0F172A !important;
-        border: 1px solid #CBD5E1 !important;
-        border-radius: 8px !important;
-        padding: 12px !important;
-    }
-    
-    .stTextArea textarea:disabled {
-        background-color: #F1F5F9 !important;
-        color: #020617 !important;
-        -webkit-text-fill-color: #020617 !important;
-        opacity: 1 !important;
-        cursor: text !important;
-    }
+[data-testid="stStatusWidget"] {visibility: hidden;}
+.stAppDeployButton {display: none;}
+#MainMenu {visibility: hidden;}
+footer {visibility: hidden;}
 
-    .badge {
-        display: inline-block;
-        padding: 5px 12px;
-        border-radius: 6px;
-        font-size: 13.5px;
-        font-weight: 700;
-        margin-right: 8px;
-        margin-bottom: 8px;
-        box-shadow: 0 1px 2px rgba(0,0,0,0.05);
-    }
-    .badge-iv { background-color: #EFF6FF; color: #1D4ED8; border: 1px solid #BFDBFE; }
-    .badge-dv { background-color: #FEF2F2; color: #B91C1C; border: 1px solid #FECACA; }
-    .badge-m { background-color: #F0FDF4; color: #15803D; border: 1px solid #BBF7D0; }
-    .badge-mod { background-color: #FFF7ED; color: #C2410C; border: 1px solid #FED7AA; }
-    
-    .var-text { 
-        font-size: 14.5px; 
-        font-weight: 600; 
-        color: #334155; 
-        margin-right: 18px; 
-        display: inline-block;
-        margin-bottom: 8px;
-    }
-    </style>
-"""
+div[data-testid="stDialog"] div[role="dialog"] {
+width: 85vw !important;
+max-width: 1200px !important;
+border-radius: 16px;
+}
+
+p, li, span, div {
+line-height: 1.6;
+color: #1E293B;
+}
+
+.stTextArea textarea {
+font-size: 15px !important;
+line-height: 1.7 !important;
+background-color: #F8FAFC !important;
+color: #0F172A !important;
+border: 1px solid #CBD5E1 !important;
+border-radius: 8px !important;
+padding: 12px !important;
+}
+
+.stTextArea textarea:disabled {
+background-color: #F1F5F9 !important;
+color: #020617 !important;
+-webkit-text-fill-color: #020617 !important;
+opacity: 1 !important;
+cursor: text !important;
+}
+
+.badge {
+display: inline-block;
+padding: 5px 12px;
+border-radius: 6px;
+font-size: 13.5px;
+font-weight: 700;
+margin-right: 8px;
+margin-bottom: 8px;
+box-shadow: 0 1px 2px rgba(0,0,0,0.05);
+}
+.badge-iv { background-color: #EFF6FF; color: #1D4ED8; border: 1px solid #BFDBFE; }
+.badge-dv { background-color: #FEF2F2; color: #B91C1C; border: 1px solid #FECACA; }
+.badge-m { background-color: #F0FDF4; color: #15803D; border: 1px solid #BBF7D0; }
+.badge-mod { background-color: #FFF7ED; color: #C2410C; border: 1px solid #FED7AA; }
+
+.var-text {
+font-size: 14.5px;
+font-weight: 600;
+color: #334155;
+margin-right: 18px;
+display: inline-block;
+margin-bottom: 8px;
+}
+</style>
+""")
 st.markdown(custom_css, unsafe_allow_html=True)
 
 # [수정] secrets.toml 파일 자체가 없는 경우 Streamlit은 KeyError가 아니라
