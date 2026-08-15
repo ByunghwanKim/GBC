@@ -217,7 +217,6 @@ def safe(text):
 def search_semantic_scholar(query, limit=10, year_range="전체 기간"):
     url = f"https://api.semanticscholar.org/graph/v1/paper/search?query={urllib.parse.quote(query)}&limit={limit}&fields=title,authors,year,venue,abstract,url,citationCount,isOpenAccess,openAccessPdf"
     
-    # 연도 필터 적용
     if year_range != "전체 기간":
         current_year = datetime.datetime.now().year
         if "5년" in year_range:
@@ -397,14 +396,13 @@ with tabs[0]:
                             if st.button("🔍 상세보기\n(설문문항)", key=f"btn_detail_{idx}_{row['No.']}", use_container_width=True):
                                 show_detail_dialog(row)
 
-# [탭 2] Semantic Scholar 검색 기능 (결과 수/연도 필터 유동적 조절, 원문 이동 버튼 추가)
+# [탭 2] Semantic Scholar 검색 기능 (링크 3종 세트 복원)
 with tabs[1]:
     st.subheader("🌐 Semantic Scholar 글로벌 논문 검색")
 
     with st.container(border=True):
         s2_query = st.text_input("🔎 Semantic Scholar 검색어 입력", placeholder="예: Technology Acceptance Model, Generative AI advertising 등", key="s2_input_query")
         
-        # [추가] 유동적 결과 수 및 연도 필터 셀렉트박스
         col_f1, col_f2 = st.columns(2)
         with col_f1:
             s2_limit = st.selectbox("📊 가져올 결과 수", [5, 10, 15, 20, 30], index=1)
@@ -454,17 +452,23 @@ with tabs[1]:
                         st.markdown(f"#### 📄 {p_title}")
                         st.markdown(f"<span style='color:#64748B; font-size:14.5px;'>👤 **{authors_str}** &nbsp;|&nbsp; 📅 **{p_year}** &nbsp;|&nbsp; 🏛️ 출처: **{p_venue}** &nbsp;|&nbsp; 📈 피인용: **{p_citations}회**</span>", unsafe_allow_html=True)
                         
-                        with st.expander("📖 초록(Abstract) 및 원문 링크 보기"):
+                        with st.expander("📖 초록(Abstract) 및 링크 보기"):
                             st.write(p_abstract)
                             st.divider()
-                            c_l1, c_l2 = st.columns(2)
+                            # [복원] Semantic Scholar 페이지, 원문 페이지, PDF 다운로드 3가지 링크 컬럼 분할
+                            c_l1, c_l2, c_l3 = st.columns(3)
                             with c_l1:
-                                st.markdown(f"🔗 [Semantic Scholar 원문 페이지 바로가기]({p_url})", unsafe_allow_html=True)
+                                st.markdown(f"🔗 [Semantic Scholar 페이지]({p_url})", unsafe_allow_html=True)
                             with c_l2:
+                                if pdf_url:
+                                    st.markdown(f"📄 [원문 페이지 바로가기]({pdf_url})", unsafe_allow_html=True)
+                                else:
+                                    st.caption("📄 원문 페이지 없음")
+                            with c_l3:
                                 if pdf_url:
                                     st.markdown(f"📥 [오픈액세스 PDF 다운로드]({pdf_url})", unsafe_allow_html=True)
                                 else:
-                                    st.caption("📥 오픈액세스 PDF 링크 없음")
+                                    st.caption("📥 오픈액세스 PDF 없음")
 
 # [탭 3] 논문 파일 업로드 및 분석
 with tabs[2]:
