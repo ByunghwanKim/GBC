@@ -29,11 +29,13 @@ font-family: 'Pretendard', 'Noto Sans KR', sans-serif !important;
 
 /* Material Symbols 아이콘(드롭다운 화살표, 비밀번호 눈 아이콘 등)은
    아이콘 전용 폰트를 유지해야 "visibility", "arrow_drop_down" 같은
-   텍스트가 아이콘 대신 그대로 노출되는 것을 막을 수 있음 */
+   텍스트가 아이콘 대신 그대로 노출되는 것을 막을 수 있음.
+   [수정] Streamlit 번들에 실제로 로드되는 폰트명은 'Material Symbols Rounded' 임
+   (Outlined가 아님 - 잘못된 폰트명이라 조용히 무시되고 있었음) */
 [data-testid="stIconMaterial"],
 span.material-symbols-outlined,
 span.material-icons {
-font-family: 'Material Symbols Outlined' !important;
+font-family: 'Material Symbols Rounded' !important;
 }
 
 [data-testid="stStatusWidget"] {visibility: hidden;}
