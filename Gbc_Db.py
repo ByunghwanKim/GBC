@@ -311,6 +311,17 @@ def find_duplicate_no(title, master_df):
         return match.iloc[0]['No.']
     return None
 
+def disp(val, default="-"):
+    """[추가] 결측값(NaN/None) 및 빈 문자열을 안전하게 처리해서 화면에 뿌릴 문자열을 만듦.
+    pandas가 빈 셀을 NaN(float)으로 읽어오면 str(NaN) == 'nan'이 되어 화면에 그대로
+    'nan' 텍스트가 노출되는 문제를 막기 위함. 이미 문자열화된 'nan'/'none'도 함께 방어."""
+    if pd.isna(val):
+        return default
+    s = str(val).strip()
+    if s == "" or s.lower() in ("nan", "none", "-"):
+        return default
+    return s
+
 def safe(text):
     """[추가] AI가 논문에서 추출한 텍스트를 HTML에 삽입하기 전 이스케이프 처리.
     <, >, & 등이 원문에 섞여 있어도 뱃지 레이아웃이 깨지지 않도록 함."""
@@ -319,28 +330,28 @@ def safe(text):
 # 팝업 모달창
 @st.dialog("📖 연구 논문 상세 분석 리포트", width="large")
 def show_detail_dialog(row):
-    st.markdown(f"### 📄 {row.get('논문/도서 제목', '-')}")
+    st.markdown(f"### 📄 {disp(row.get('논문/도서 제목'))}")
     
     col_m1, col_m2, col_m3 = st.columns([1, 1, 2])
-    col_m1.info(f"👤 **저자:** {row.get('저자', '-')}")
-    col_m2.info(f"📅 **발행 연도:** {row.get('발행 연도', '-')}")
-    col_m3.info(f"🏛️ **학술지명/출처:** {row.get('학술지명/출처', '-')}")
+    col_m1.info(f"👤 **저자:** {disp(row.get('저자'))}")
+    col_m2.info(f"📅 **발행 연도:** {disp(row.get('발행 연도'))}")
+    col_m3.info(f"🏛️ **학술지명/출처:** {disp(row.get('학술지명/출처'))}")
     
     st.divider()
     
     col_left, col_right = st.columns(2)
     with col_left:
         st.markdown("#### 💡 핵심 이론")
-        st.info(row.get('핵심 이론', '-'))
+        st.info(disp(row.get('핵심 이론')))
         
         st.markdown("#### 📊 연구 모형")
-        st.success(row.get('연구 모형', '-'))
+        st.success(disp(row.get('연구 모형')))
         
         st.markdown("#### 🔗 연구 변수 구성")
-        iv = str(row.get('독립변수(IV)', '-')).strip()
-        m = str(row.get('매개변수(Mediator)', '-')).strip()
-        mod = str(row.get('조절변수(Moderator)', '-')).strip()
-        dv = str(row.get('종속변수(DV)', '-')).strip()
+        iv = disp(row.get('독립변수(IV)'))
+        m = disp(row.get('매개변수(Mediator)'))
+        mod = disp(row.get('조절변수(Moderator)'))
+        dv = disp(row.get('종속변수(DV)'))
         
         html_vars = "<div style='line-height:2.0;'>"
         if iv not in ['-', '']: html_vars += f"<span class='badge badge-iv'>IV</span> <span class='var-text'>{safe(iv)}</span><br>"
@@ -352,16 +363,16 @@ def show_detail_dialog(row):
         
     with col_right:
         st.markdown("#### 📌 가설 체계")
-        st.text_area("가설 정리", value=str(row.get('가설 정리', '-')), height=150, disabled=True, label_visibility="collapsed")
+        st.text_area("가설 정리", value=disp(row.get('가설 정리')), height=150, disabled=True, label_visibility="collapsed")
         
         st.markdown("#### 🎯 주요 발견 (Key Findings)")
-        st.warning(row.get('주요 발견(Key Findings)', '-'))
+        st.warning(disp(row.get('주요 발견(Key Findings)')))
 
     st.divider()
     
     st.markdown("#### 📝 측정 척도 및 설문 문항 원문")
-    survey_content = str(row.get('설문문항', '-'))
-    if survey_content and survey_content != "-":
+    survey_content = disp(row.get('설문문항'))
+    if survey_content != "-":
         st.text_area("설문문항 상세", value=survey_content, height=450, label_visibility="collapsed")
     else:
         st.error("등록된 세부 설문문항 데이터가 없습니다.")
@@ -428,13 +439,13 @@ with tabs[0]:
                         c1, c2 = st.columns([6, 1])
                         
                         with c1:
-                            st.markdown(f"#### 📄 {row.get('논문/도서 제목', '-')}")
-                            st.markdown(f"<span style='color:#64748B; font-size:15px;'>👤 **{safe(row.get('저자', '-'))}** &nbsp;|&nbsp; 📅 **{safe(row.get('발행 연도', '-'))}** &nbsp;|&nbsp; 🏛️ **{safe(row.get('학술지명/출처', '-'))}**</span>", unsafe_allow_html=True)
+                            st.markdown(f"#### 📄 {disp(row.get('논문/도서 제목'))}")
+                            st.markdown(f"<span style='color:#64748B; font-size:15px;'>👤 **{safe(disp(row.get('저자')))}** &nbsp;|&nbsp; 📅 **{safe(disp(row.get('발행 연도')))}** &nbsp;|&nbsp; 🏛️ **{safe(disp(row.get('학술지명/출처')))}**</span>", unsafe_allow_html=True)
                             
-                            iv = str(row.get('독립변수(IV)', '-')).strip()
-                            m = str(row.get('매개변수(Mediator)', '-')).strip()
-                            mod = str(row.get('조절변수(Moderator)', '-')).strip()
-                            dv = str(row.get('종속변수(DV)', '-')).strip()
+                            iv = disp(row.get('독립변수(IV)'))
+                            m = disp(row.get('매개변수(Mediator)'))
+                            mod = disp(row.get('조절변수(Moderator)'))
+                            dv = disp(row.get('종속변수(DV)'))
                             
                             html_vars = "<div style='margin-top: 12px; margin-bottom: 5px;'>"
                             if iv not in ['-', '']: html_vars += f"<span class='badge badge-iv'>IV</span><span class='var-text'>{safe(iv)}</span>"
@@ -695,3 +706,76 @@ if is_admin:
                     new_df['No.'] = range(1, len(new_df) + 1)
                     save_master_excel(new_df, sha)
                     st.success(f"No. {del_target_no} 데이터가 삭제되었습니다. 페이지를 새로고침하세요.")
+
+        st.divider()
+
+        # [추가] 중복 논문 정리 기능
+        st.markdown("### 🧹 중복 논문 정리")
+        st.caption("제목(공백·구두점·대소문자 무시)이 같은 논문을 찾아, 각 그룹에서 가장 내용이 "
+                   "충실한(빈 칸이 적은) 항목 하나만 남기고 나머지를 삭제합니다.")
+
+        def build_dup_plan(df):
+            """중복 그룹을 찾고, 그룹별로 남길 행/지울 행을 결정한 계획(plan)을 만든다."""
+            work = df.copy()
+            work['_norm_title'] = work['논문/도서 제목'].astype(str).apply(normalize_title)
+            # 필드가 얼마나 채워져 있는지(=충실도) 점수 계산: '-' 나 결측이 아닌 필드 개수
+            check_cols = [c for c in DB_COLUMNS if c not in ('No.', '논문/도서 제목')]
+            def completeness(row):
+                score = 0
+                for c in check_cols:
+                    v = row.get(c, None)
+                    if pd.notna(v) and str(v).strip() not in ('-', ''):
+                        score += 1
+                return score
+            work['_완성도'] = work.apply(completeness, axis=1)
+
+            groups = work[work['_norm_title'] != ''].groupby('_norm_title')
+            keep_rows = []
+            drop_rows = []
+            group_previews = []
+            for norm_title, g in groups:
+                if len(g) <= 1:
+                    continue
+                # 완성도가 가장 높은 행을 남기고, 동률이면 No.가 가장 작은(먼저 등록된) 행을 남김
+                g_sorted = g.sort_values(by=['_완성도', 'No.'], ascending=[False, True])
+                keep = g_sorted.iloc[0]
+                drops = g_sorted.iloc[1:]
+                keep_rows.append(keep['No.'])
+                drop_rows.extend(drops['No.'].tolist())
+                group_previews.append({
+                    'title': keep['논문/도서 제목'],
+                    'keep_no': keep['No.'],
+                    'drop_nos': drops['No.'].tolist(),
+                    'keep_completeness': keep['_완성도'],
+                    'drop_completeness': drops['_완성도'].tolist(),
+                })
+            return keep_rows, drop_rows, group_previews
+
+        if st.button("🔍 중복 항목 미리보기", type="secondary"):
+            keep_rows, drop_rows, previews = build_dup_plan(master_df)
+            st.session_state['dup_preview'] = previews
+            st.session_state['dup_drop_nos'] = drop_rows
+
+        if st.session_state.get('dup_preview'):
+            previews = st.session_state['dup_preview']
+            drop_nos = st.session_state['dup_drop_nos']
+            if not previews:
+                st.info("중복으로 판단되는 논문이 없습니다.")
+            else:
+                st.warning(f"총 {len(previews)}개 그룹, {len(drop_nos)}건이 삭제 대상입니다. "
+                           f"삭제 전 아래 내용을 꼭 확인해주세요.")
+                for p in previews:
+                    with st.container(border=True):
+                        st.markdown(f"**📄 {p['title']}**")
+                        st.write(f"✅ 유지: No.{p['keep_no']} (완성도 {p['keep_completeness']}개 필드)")
+                        for dno, dcomp in zip(p['drop_nos'], p['drop_completeness']):
+                            st.write(f"🗑️ 삭제 예정: No.{dno} (완성도 {dcomp}개 필드)")
+
+                if st.button("⚠️ 위 목록대로 중복 삭제 실행 (되돌릴 수 없음)", type="primary"):
+                    fresh_df, fresh_sha = load_master_excel()  # 최신 상태 다시 로드 (동시 수정 대비)
+                    cleaned = fresh_df[~fresh_df['No.'].isin(drop_nos)].reset_index(drop=True)
+                    cleaned['No.'] = range(1, len(cleaned) + 1)
+                    save_master_excel(cleaned, fresh_sha)
+                    st.success(f"중복 {len(drop_nos)}건을 삭제하고 No.를 다시 정렬했습니다. 페이지를 새로고침하세요.")
+                    del st.session_state['dup_preview']
+                    del st.session_state['dup_drop_nos']
