@@ -483,7 +483,7 @@ with tabs[0]:
                             if st.button("🔍 상세보기", key=f"btn_detail_{idx}_{row['No.']}", use_container_width=True):
                                 show_detail_dialog(row)
 
-# [탭 2] Semantic Scholar 검색 기능 (PDF 다운로드 버튼 옆에 한글 번역 버튼 배치)
+# [탭 2] Semantic Scholar 검색 기능 (PDF 다운로드와 한글 번역 버튼 가로 정렬 고정)
 with tabs[1]:
     st.subheader("🌐 Semantic Scholar 글로벌 논문 검색")
 
@@ -542,25 +542,25 @@ with tabs[1]:
                         with st.expander("📖 초록(Abstract) 및 링크 보기"):
                             st.write(p_abstract)
                             st.divider()
-                            # [수정] 3개 컬럼으로 나눠서 [Semantic Scholar 페이지], [원문 페이지], [오픈액세스 PDF 다운로드] 배치
-                            c_l1, c_l2, c_l3 = st.columns(3)
+                            
+                            # [수정] 4개 컬럼으로 쪼개서 [Semantic Scholar 페이지], [원문 페이지], [PDF 다운로드], [한글 번역 보기]를 완벽히 가로 한 줄로 배치
+                            c_l1, c_l2, c_l3, c_l4 = st.columns(4)
                             with c_l1:
-                                st.markdown(f"🔗 [Semantic Scholar 페이지]({p_url})", unsafe_allow_html=True)
+                                st.markdown(f"🔗 [S2 페이지]({p_url})", unsafe_allow_html=True)
                             with c_l2:
                                 if pdf_url:
-                                    st.markdown(f"📄 [원문 페이지 바로가기]({pdf_url})", unsafe_allow_html=True)
+                                    st.markdown(f"📄 [원문 페이지]({pdf_url})", unsafe_allow_html=True)
                                 else:
-                                    st.caption("📄 원문 페이지 없음")
+                                    st.caption("📄 원문 없음")
                             with c_l3:
                                 if pdf_url:
-                                    st.markdown(f"📥 [오픈액세스 PDF 다운로드]({pdf_url})", unsafe_allow_html=True)
+                                    st.markdown(f"📥 [PDF 다운로드]({pdf_url})", unsafe_allow_html=True)
                                 else:
-                                    st.caption("📥 오픈액세스 PDF 없음")
-                            
-                            st.divider()
-                            # [수정] PDF 다운로드 링크 바로 아래(또는 우측)에 한글 번역 보기 버튼 배치
-                            if st.button("🇰🇷 한글 초록 번역 보기", key=f"btn_trans_{i}_{paper.get('paperId', i)}", use_container_width=True):
-                                show_s2_abstract_dialog(p_title, p_abstract)
+                                    st.caption("📥 PDF 없음")
+                            with c_l4:
+                                st.write("")
+                                if st.button("🇰🇷 한글 번역", key=f"btn_trans_{i}_{paper.get('paperId', i)}", use_container_width=True):
+                                    show_s2_abstract_dialog(p_title, p_abstract)
 
 # [탭 3] 논문 파일 업로드 및 분석
 with tabs[2]:
