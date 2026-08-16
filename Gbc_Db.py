@@ -279,8 +279,6 @@ def scroll_to_top():
                     'section.main, [data-testid="stMain"], [data-testid="stAppViewContainer"]'
                 );
                 candidates.forEach(function(el) { el.scrollTo({top: 0, behavior: 'instant'}); });
-                doc.documentElement.scrollTo({top: 0, behavior: 'instant'});
-                doc.body.scrollTo({top: 0, behavior: 'instant'});
             })();
         </script>
         """,
