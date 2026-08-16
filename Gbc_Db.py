@@ -716,7 +716,7 @@ with tabs[1]:
         with col_c2:
             s2_journal_only = st.checkbox("📖 학술지(Journal Article) 논문만 보기")
 
-    if st.button("🚀 Semantic Scholar 검색 실행", type="primary", key="btn_s2_search"):
+    if st.button("🚀 Semantic Scholar 검색", type="primary", key="btn_s2_search"):
         if not s2_query.strip():
             st.warning("검색어를 입력해주세요.")
         else:
