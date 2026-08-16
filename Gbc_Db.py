@@ -1,4 +1,5 @@
 import streamlit as st
+import streamlit.components.v1 as components
 import pandas as pd
 import json
 import io
@@ -264,6 +265,28 @@ def disp(val, default="-"):
 def safe(text):
     return html.escape(str(text))
 
+def scroll_to_top():
+    """[추가] 페이지 하단의 '다음/이전' 버튼을 눌러도 화면이 계속 하단에 머무는 문제 해결.
+    버튼 클릭 시 이 함수를 호출할 플래그만 세팅해두고, 다음 rerun 시작 시점에
+    이 스크립트를 실행해서 화면을 맨 위로 스크롤한다. Streamlit 컴포넌트는 iframe 안에서
+    실행되므로 window.parent를 통해 실제 앱 화면(부모 문서)에 접근해야 함."""
+    components.html(
+        """
+        <script>
+            (function() {
+                var doc = window.parent.document;
+                var candidates = doc.querySelectorAll(
+                    'section.main, [data-testid="stMain"], [data-testid="stAppViewContainer"]'
+                );
+                candidates.forEach(function(el) { el.scrollTo({top: 0, behavior: 'instant'}); });
+                doc.documentElement.scrollTo({top: 0, behavior: 'instant'});
+                doc.body.scrollTo({top: 0, behavior: 'instant'});
+            })();
+        </script>
+        """,
+        height=0,
+    )
+
 class SearchAPIError(Exception):
     """[추가] 검색/번역 API가 실패했을 때 쓰는 전용 예외.
     @st.cache_data는 함수가 예외를 던지면 그 실행을 캐싱하지 않으므로,
@@ -524,6 +547,10 @@ elif input_pw:
 # 메인 화면 구성
 st.title("📚 GBC 연구 논문 DB 관리 시스템")
 
+# [추가] 이전 rerun에서 '페이지 이동' 요청이 있었다면, 이번 rerun 시작 시점에 화면을 맨 위로 스크롤
+if st.session_state.pop('scroll_to_top', False):
+    scroll_to_top()
+
 tab_names = ["🔍 연구 논문 DB 검색", "🌐 Semantic Scholar 검색", "🚀 논문 파일 업로드"]
 if is_admin:
     tab_names.append("⚙️ 관리자 전용 관리 (DB/다운로드)")
@@ -670,12 +697,14 @@ with tabs[0]:
                 with cp4:
                     if st.button("◀ 이전 20건", key="prev_bot", disabled=(st.session_state['db_page'] == 1), use_container_width=True):
                         st.session_state['db_page'] -= 1
+                        st.session_state['scroll_to_top'] = True
                         st.rerun()
                 with cp5:
                     st.markdown(f"<div style='text-align:center; padding-top:8px; font-weight:600; color:#475569;'>페이지 {st.session_state['db_page']} / {total_pages}</div>", unsafe_allow_html=True)
                 with cp6:
                     if st.button("다음 20건 ▶", key="next_bot", disabled=(st.session_state['db_page'] == total_pages), use_container_width=True):
                         st.session_state['db_page'] += 1
+                        st.session_state['scroll_to_top'] = True
                         st.rerun()
 
 # [탭 2] Semantic Scholar 검색 기능
