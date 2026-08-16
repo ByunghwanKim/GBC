@@ -266,9 +266,10 @@ def safe(text):
     return html.escape(str(text))
 
 def scroll_to_results():
-    """[수정] 화면 전체가 아니라 '검색 결과' 영역만 시야에 들어오도록 스크롤.
-    결과 리스트 바로 위에 심어둔 앵커(#db-search-results-anchor)를 찾아서
-    scrollIntoView로 그 지점까지만 이동시킨다. window.parent를 통해 실제
+    """[수정] 바깥쪽(브라우저 창) 스크롤과 안쪽(결과 리스트 750px 박스) 스크롤이
+    따로 놀던 문제를 하나로 합침. 앵커(#db-search-results-anchor)로 바깥쪽 스크롤을
+    이동시키는 동시에, 그 근처에서 실제로 내부 스크롤이 걸려있는 요소(scrollHeight >
+    clientHeight)를 찾아 scrollTop을 0으로 리셋한다. window.parent를 통해 실제
     앱 화면(부모 문서)에 접근해야 함 (컴포넌트는 iframe 안에서 실행되므로)."""
     components.html(
         """
@@ -276,8 +277,21 @@ def scroll_to_results():
             (function() {
                 var doc = window.parent.document;
                 var anchor = doc.getElementById('db-search-results-anchor');
-                if (anchor) {
-                    anchor.scrollIntoView({behavior: 'instant', block: 'start'});
+                if (!anchor) { return; }
+
+                // 1) 바깥쪽(브라우저 창) 스크롤: 앵커 지점으로 이동
+                anchor.scrollIntoView({behavior: 'instant', block: 'start'});
+
+                // 2) 안쪽 스크롤: 앵커 근처(형제/부모 범위)에서 실제로 내부 스크롤이
+                //    걸려있는 요소를 찾아 맨 위로 리셋
+                var scope = anchor.parentElement ? anchor.parentElement.parentElement : null;
+                if (scope) {
+                    var all = scope.querySelectorAll('div');
+                    all.forEach(function(el) {
+                        if (el.scrollHeight > el.clientHeight + 5) {
+                            el.scrollTop = 0;
+                        }
+                    });
                 }
             })();
         </script>
