@@ -200,6 +200,8 @@ def build_paper_link(row):
     query = urllib.parse.quote(title)
     return f"https://scholar.google.com/scholar?q={query}", "Google Scholar 검색"
 
+# [수정 1] 앱의 멈춤 현상(병목) 방지를 위해 15초 단위 캐싱 적용
+@st.cache_data(ttl=15, show_spinner=False)
 def load_master_excel():
     try:
         file_content = repo.get_contents(EXCEL_FILE_PATH)
@@ -263,7 +265,7 @@ def disp(val, default="-"):
 def safe(text):
     return html.escape(str(text))
 
-def search_semantic_scholar(query, limit=10, year_range="전체 기간", max_retries=2):
+def search_semantic_scholar(query, limit=10, year_range="전체 기간", fields_of_study="", max_retries=2):
     url = f"https://api.semanticscholar.org/graph/v1/paper/search?query={urllib.parse.quote(query)}&limit={limit}&fields=title,authors,year,venue,abstract,url,citationCount,isOpenAccess,openAccessPdf"
     
     if year_range != "전체 기간":
@@ -281,6 +283,9 @@ def search_semantic_scholar(query, limit=10, year_range="전체 기간", max_ret
             
         if start_year:
             url += f"&year={start_year}-{current_year}"
+            
+    if fields_of_study:
+        url += f"&fieldsOfStudy={urllib.parse.quote(fields_of_study)}"
 
     headers = {"User-Agent": "GBC-Research-App/1.0"}
     if S2_API_KEY:
@@ -306,7 +311,6 @@ def search_semantic_scholar(query, limit=10, year_range="전체 기간", max_ret
             return {"error": f"네트워크 오류: {str(e)}"}
     return {"error": "알 수 없는 API 호출 실패"}
 
-# [수정 1, 2, 3, 4] 구글 번역 함수 고도화: 캐싱 적용, User-Agent 추가, 재시도 로직 추가
 @st.cache_data(ttl=3600, show_spinner=False)
 def translate_via_google(text, max_retries=2):
     if not text or text.strip() in ("", "초록 정보가 없습니다."):
@@ -320,7 +324,6 @@ def translate_via_google(text, max_retries=2):
         "dt": "t",
         "q": text
     }
-    # User-Agent를 브라우저처럼 위장하여 차단 방지
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36"
     }
@@ -348,7 +351,6 @@ def translate_via_google(text, max_retries=2):
             
     return "알 수 없는 번역 오류"
 
-# 팝업 모달창 (DB 검색용)
 @st.dialog("📖 연구 논문 상세 분석 리포트", width="large")
 def show_detail_dialog(row):
     _title = disp(row.get('논문/도서 제목'))
@@ -408,7 +410,6 @@ def show_detail_dialog(row):
     else:
         st.error("등록된 세부 설문문항 데이터가 없습니다.")
 
-# Semantic Scholar 초록 구글 번역 팝업 모달창
 @st.dialog("🇰🇷 구글 번역 논문 초록 한글 번역", width="large")
 def show_s2_abstract_dialog(title, abstract):
     st.markdown(f"### 📄 {safe(title)}")
@@ -424,7 +425,6 @@ def show_s2_abstract_dialog(title, abstract):
         with st.spinner("구글 번역 엔진으로 번역 중입니다..."):
             korean_abstract = translate_via_google(abstract)
                 
-        # [수정] disabled=True 누락 해결 (UI 재실행 방지 및 수정 불가 설정)
         st.text_area("한글 번역 초록", value=korean_abstract, height=350, disabled=True, label_visibility="collapsed")
 
 # 사이드바 관리자 인증
@@ -559,21 +559,36 @@ with tabs[0]:
 with tabs[1]:
     st.subheader("🌐 Semantic Scholar 글로벌 논문 검색")
 
+    field_options = {
+        "전체 분야 (All Fields)": "",
+        "경영학 (Business)": "Business",
+        "경제학 (Economics)": "Economics",
+        "경영/경제 통합 (Business & Economics)": "Business,Economics",
+        "심리학 (Psychology)": "Psychology",
+        "컴퓨터공학 (Computer Science)": "Computer Science",
+        "사회학 (Sociology)": "Sociology",
+        "정치학 (Political Science)": "Political Science",
+        "수학/통계 (Mathematics)": "Mathematics"
+    }
+
     with st.container(border=True):
         s2_query = st.text_input("🔎 Semantic Scholar 검색어 입력", placeholder="예: Technology Acceptance Model, Generative AI advertising 등", key="s2_input_query")
         
-        col_f1, col_f2 = st.columns(2)
+        col_f1, col_f2, col_f3 = st.columns(3)
         with col_f1:
             s2_limit = st.selectbox("📊 가져올 결과 수", [5, 10, 15, 20, 30], index=1)
         with col_f2:
             s2_year_range = st.selectbox("📅 검색 연도 범위", ["전체 기간", "최근 5년", "최근 10년", "최근 15년", "최근 20년"], index=0)
+        with col_f3:
+            s2_field_label = st.selectbox("📚 연구 분야 (Category)", list(field_options.keys()), index=3)
 
     if st.button("🚀 Semantic Scholar 검색 실행", type="primary", key="btn_s2_search"):
         if not s2_query.strip():
             st.warning("검색어를 입력해주세요.")
         else:
             with st.spinner("Semantic Scholar에서 논문을 검색하고 있습니다..."):
-                result_json = search_semantic_scholar(s2_query, limit=s2_limit, year_range=s2_year_range)
+                selected_field_value = field_options[s2_field_label]
+                result_json = search_semantic_scholar(s2_query, limit=s2_limit, year_range=s2_year_range, fields_of_study=selected_field_value)
                 st.session_state['s2_last_result'] = result_json
                 st.session_state['s2_queried'] = True
 
@@ -588,7 +603,7 @@ with tabs[1]:
             st.markdown(f"##### 📌 Semantic Scholar 검색 결과 (총 {total}건 중 상위 {len(papers)}건 표시)")
 
             if not papers:
-                st.info("검색된 논문이 없습니다. 다른 키워드로 시도해 보세요.")
+                st.info("검색된 논문이 없습니다. 검색어 또는 연구 분야를 변경해 보세요.")
             else:
                 for i, paper in enumerate(papers):
                     p_title = paper.get("title", "제목 없음")
@@ -830,6 +845,8 @@ with tabs[2]:
                         updated_df = pd.concat([updated_df, new_df], ignore_index=True)
 
                     save_master_excel(updated_df, sha)
+                    # [수정 2] 파일 추가 저장 직후 캐시 비우기 (최신 상태 동기화)
+                    load_master_excel.clear()
                     status.update(label="전체 파일 처리 및 스마트 DB 저장 완료!", state="complete", expanded=False)
 
                     st.success(f"신규 등록 {len(new_entries)}건, 스마트 업데이트 {len(updated_entries)}건이 완료되었습니다.")
@@ -881,6 +898,8 @@ if is_admin:
                     new_df = master_df[master_df['No.'] != del_target_no].reset_index(drop=True)
                     new_df['No.'] = range(1, len(new_df) + 1)
                     save_master_excel(new_df, sha)
+                    # [수정 3] 삭제 후 최신 상태 동기화를 위해 캐시 클리어
+                    load_master_excel.clear()
                     st.success(f"No. {del_target_no} 데이터가 삭제되었습니다. 페이지를 새로고침하세요.")
 
         st.divider()
@@ -942,10 +961,13 @@ if is_admin:
                             st.write(f"🗑️ 삭제 예정: No.{dno} (완성도 {dcomp}개 필드)")
 
                 if st.button("⚠️ 위 목록대로 중복 삭제 실행 (되돌릴 수 없음)", type="primary"):
+                    # [수정 4] 실제 처리 전후로 캐시를 날려 동기화 강제
+                    load_master_excel.clear()
                     fresh_df, fresh_sha = load_master_excel()
                     cleaned = fresh_df[~fresh_df['No.'].isin(drop_nos)].reset_index(drop=True)
                     cleaned['No.'] = range(1, len(cleaned) + 1)
                     save_master_excel(cleaned, fresh_sha)
+                    load_master_excel.clear()
                     st.success(f"중복 {len(drop_nos)}건을 삭제하고 No.를 다시 정렬했습니다. 페이지를 새로고침하세요.")
                     del st.session_state['dup_preview']
                     del st.session_state['dup_drop_nos']
