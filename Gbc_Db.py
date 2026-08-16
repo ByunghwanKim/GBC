@@ -306,7 +306,6 @@ def search_semantic_scholar(query, limit=10, year_range="전체 기간", max_ret
             return {"error": f"네트워크 오류: {str(e)}"}
     return {"error": "알 수 없는 API 호출 실패"}
 
-# [수정] 표준 구글 번역 API 엔드포인트 연동 (외부 패키지 충돌 원천 방지)
 def translate_via_google(text):
     if not text or text.strip() in ("", "초록 정보가 없습니다."):
         return "번역할 초록 내용이 없습니다."
@@ -535,7 +534,7 @@ with tabs[0]:
                             if st.button("🔍 상세보기", key=f"btn_detail_{idx}_{row['No.']}", use_container_width=True):
                                 show_detail_dialog(row)
 
-# [탭 2] Semantic Scholar 검색 기능 (구글 번역 연동)
+# [탭 2] Semantic Scholar 검색 기능
 with tabs[1]:
     st.subheader("🌐 Semantic Scholar 글로벌 논문 검색")
 
@@ -892,7 +891,7 @@ if is_admin:
                 keep = g_sorted.iloc[0]
                 drops = g_sorted.iloc[1:]
                 keep_rows.append(keep['No.'])
-                drop_rows.extend(drops['No.'].tolist()) 취소
+                drop_rows.extend(drops['No.'].tolist())
                 group_previews.append({
                     'title': keep['논문/도서 제목'],
                     'keep_no': keep['No.'],
