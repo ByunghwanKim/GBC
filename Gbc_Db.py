@@ -200,8 +200,7 @@ def build_paper_link(row):
     query = urllib.parse.quote(title)
     return f"https://scholar.google.com/scholar?q={query}", "Google Scholar 검색"
 
-# [수정] 앱 전반의 멈춤 현상(병목) 방지를 위해 300초(5분) 단위 넉넉한 캐싱 적용
-@st.cache_data(ttl=300, show_spinner=False)
+@st.cache_data(ttl=15, show_spinner=False)
 def load_master_excel():
     try:
         file_content = repo.get_contents(EXCEL_FILE_PATH)
@@ -446,7 +445,7 @@ if is_admin:
 
 tabs = st.tabs(tab_names)
 
-# [탭 1] 연구 논문 DB 검색
+# [탭 1] 연구 논문 DB 검색 (페이지네이션 적용 완료)
 with tabs[0]:
     st.subheader("🔍 연구 논문 DB 정밀 검색")
     
@@ -517,14 +516,50 @@ with tabs[0]:
         if filtered_df.empty:
             st.warning("조건에 맞는 논문이 없습니다. 검색어 또는 필드를 변경해 보세요.")
         else:
-            # [수정] UI 렌더링 병목 방지를 위해 최대 50건만 그리기 제한 적용
-            max_render = 50
-            if len(filtered_df) > max_render:
-                st.info(f"⚡ 브라우저 속도 저하 방지를 위해 상위 **{max_render}건**만 화면에 표시합니다. 키워드를 더 상세히 입력해주세요.")
-                render_df = filtered_df.head(max_render)
-            else:
-                render_df = filtered_df
+            # --- 페이지네이션(Pagination) 로직 ---
+            ITEMS_PER_PAGE = 20
+            total_items = len(filtered_df)
+            total_pages = (total_items - 1) // ITEMS_PER_PAGE + 1
+            
+            # Session State 초기화
+            if 'db_page' not in st.session_state:
+                st.session_state['db_page'] = 1
+            if 'last_search_kw' not in st.session_state:
+                st.session_state['last_search_kw'] = search_kw
+                st.session_state['last_search_field'] = search_field
+                
+            # 검색 조건이 바뀌면 1페이지로 자동 리셋
+            if (st.session_state['last_search_kw'] != search_kw) or (st.session_state['last_search_field'] != search_field):
+                st.session_state['db_page'] = 1
+                st.session_state['last_search_kw'] = search_kw
+                st.session_state['last_search_field'] = search_field
+                
+            # 페이지 범위 초과 방지 안전장치
+            if st.session_state['db_page'] > total_pages:
+                st.session_state['db_page'] = total_pages
+            if st.session_state['db_page'] < 1:
+                st.session_state['db_page'] = 1
+                
+            # 현재 페이지 데이터 슬라이싱
+            start_idx = (st.session_state['db_page'] - 1) * ITEMS_PER_PAGE
+            end_idx = start_idx + ITEMS_PER_PAGE
+            render_df = filtered_df.iloc[start_idx:end_idx]
 
+            # 상단 페이지 컨트롤러 UI
+            if total_pages > 1:
+                cp1, cp2, cp3 = st.columns([1, 4, 1])
+                with cp1:
+                    if st.button("◀ 이전 20건", key="prev_top", disabled=(st.session_state['db_page'] == 1), use_container_width=True):
+                        st.session_state['db_page'] -= 1
+                        st.rerun()
+                with cp2:
+                    st.markdown(f"<div style='text-align:center; padding-top:8px; font-weight:600; color:#475569;'>페이지 {st.session_state['db_page']} / {total_pages}</div>", unsafe_allow_html=True)
+                with cp3:
+                    if st.button("다음 20건 ▶", key="next_top", disabled=(st.session_state['db_page'] == total_pages), use_container_width=True):
+                        st.session_state['db_page'] += 1
+                        st.rerun()
+
+            # 20건의 데이터 렌더링
             with st.container(height=750, border=False):
                 for idx, row in render_df.iterrows():
                     with st.container(border=True):
@@ -562,6 +597,21 @@ with tabs[0]:
                             st.write("") 
                             if st.button("🔍 상세보기", key=f"btn_detail_{idx}_{row['No.']}", use_container_width=True):
                                 show_detail_dialog(row)
+
+            # 하단 페이지 컨트롤러 UI (스크롤을 다 내린 후 편리하게 누르기 위함)
+            if total_pages > 1:
+                st.divider()
+                cp4, cp5, cp6 = st.columns([1, 4, 1])
+                with cp4:
+                    if st.button("◀ 이전 20건", key="prev_bot", disabled=(st.session_state['db_page'] == 1), use_container_width=True):
+                        st.session_state['db_page'] -= 1
+                        st.rerun()
+                with cp5:
+                    st.markdown(f"<div style='text-align:center; padding-top:8px; font-weight:600; color:#475569;'>페이지 {st.session_state['db_page']} / {total_pages}</div>", unsafe_allow_html=True)
+                with cp6:
+                    if st.button("다음 20건 ▶", key="next_bot", disabled=(st.session_state['db_page'] == total_pages), use_container_width=True):
+                        st.session_state['db_page'] += 1
+                        st.rerun()
 
 # [탭 2] Semantic Scholar 검색 기능
 with tabs[1]:
