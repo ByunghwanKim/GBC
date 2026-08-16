@@ -264,8 +264,12 @@ def disp(val, default="-"):
 def safe(text):
     return html.escape(str(text))
 
-def search_semantic_scholar(query, limit=10, year_range="전체 기간", fields_of_study="", max_retries=2):
-    url = f"https://api.semanticscholar.org/graph/v1/paper/search?query={urllib.parse.quote(query)}&limit={limit}&fields=title,authors,year,venue,abstract,url,citationCount,isOpenAccess,openAccessPdf"
+# [수정] 정렬 기능(sort_by) 추가 및 스마트 소팅 로직 반영
+def search_semantic_scholar(query, limit=10, year_range="전체 기간", fields_of_study="", sort_by="관련도순", max_retries=2):
+    # 정렬이 필요할 경우 Semantic Scholar API에서 최대 100개를 가져와 파이썬에서 정밀 정렬 수행
+    api_limit = 100 if sort_by != "관련도순" else limit
+    
+    url = f"https://api.semanticscholar.org/graph/v1/paper/search?query={urllib.parse.quote(query)}&limit={api_limit}&fields=title,authors,year,venue,abstract,url,citationCount,isOpenAccess,openAccessPdf"
     
     if year_range != "전체 기간":
         current_year = datetime.datetime.now().year
@@ -294,7 +298,19 @@ def search_semantic_scholar(query, limit=10, year_range="전체 기간", fields_
         try:
             response = requests.get(url, headers=headers, timeout=12)
             if response.status_code == 200:
-                return response.json()
+                res_json = response.json()
+                papers = res_json.get("data", [])
+                
+                # 스마트 소팅 (파이썬 내부에서 정밀 정렬)
+                if sort_by == "피인용수 높은 순":
+                    papers.sort(key=lambda x: x.get("citationCount") or 0, reverse=True)
+                elif sort_by == "최신순":
+                    papers.sort(key=lambda x: x.get("year") or 0, reverse=True)
+                
+                # 사용자가 요청한 limit 개수만큼만 슬라이싱하여 반환
+                res_json["data"] = papers[:limit]
+                return res_json
+                
             elif response.status_code == 429:
                 if attempt < max_retries:
                     time.sleep(2.0)
@@ -516,36 +532,31 @@ with tabs[0]:
         if filtered_df.empty:
             st.warning("조건에 맞는 논문이 없습니다. 검색어 또는 필드를 변경해 보세요.")
         else:
-            # --- 페이지네이션(Pagination) 로직 ---
             ITEMS_PER_PAGE = 20
             total_items = len(filtered_df)
             total_pages = (total_items - 1) // ITEMS_PER_PAGE + 1
             
-            # Session State 초기화
             if 'db_page' not in st.session_state:
                 st.session_state['db_page'] = 1
             if 'last_search_kw' not in st.session_state:
                 st.session_state['last_search_kw'] = search_kw
                 st.session_state['last_search_field'] = search_field
                 
-            # 검색 조건이 바뀌면 1페이지로 자동 리셋
             if (st.session_state['last_search_kw'] != search_kw) or (st.session_state['last_search_field'] != search_field):
                 st.session_state['db_page'] = 1
                 st.session_state['last_search_kw'] = search_kw
                 st.session_state['last_search_field'] = search_field
                 
-            # 페이지 범위 초과 방지 안전장치
             if st.session_state['db_page'] > total_pages:
                 st.session_state['db_page'] = total_pages
             if st.session_state['db_page'] < 1:
                 st.session_state['db_page'] = 1
                 
-            # 현재 페이지 데이터 슬라이싱
             start_idx = (st.session_state['db_page'] - 1) * ITEMS_PER_PAGE
             end_idx = start_idx + ITEMS_PER_PAGE
             render_df = filtered_df.iloc[start_idx:end_idx]
 
-            # 20건의 데이터 렌더링
+            # 상단 페이지 컨트롤러 UI 제거 (20건 렌더링 시작)
             with st.container(height=750, border=False):
                 for idx, row in render_df.iterrows():
                     with st.container(border=True):
@@ -584,7 +595,7 @@ with tabs[0]:
                             if st.button("🔍 상세보기", key=f"btn_detail_{idx}_{row['No.']}", use_container_width=True):
                                 show_detail_dialog(row)
 
-            # 하단 페이지 컨트롤러 UI (스크롤을 다 내린 후 편리하게 누르기 위함)
+            # 하단 페이지 컨트롤러 UI
             if total_pages > 1:
                 st.divider()
                 cp4, cp5, cp6 = st.columns([1, 4, 1])
@@ -618,13 +629,16 @@ with tabs[1]:
     with st.container(border=True):
         s2_query = st.text_input("🔎 Semantic Scholar 검색어 입력", placeholder="예: Technology Acceptance Model, Generative AI advertising 등", key="s2_input_query")
         
-        col_f1, col_f2, col_f3 = st.columns(3)
+        # [수정] 정렬 기준(Sort By) 드롭다운을 4번째 열로 추가
+        col_f1, col_f2, col_f3, col_f4 = st.columns(4)
         with col_f1:
             s2_limit = st.selectbox("📊 가져올 결과 수", [5, 10, 15, 20, 30], index=1)
         with col_f2:
             s2_year_range = st.selectbox("📅 검색 연도 범위", ["전체 기간", "최근 5년", "최근 10년", "최근 15년", "최근 20년"], index=0)
         with col_f3:
             s2_field_label = st.selectbox("📚 연구 분야 (Category)", list(field_options.keys()), index=3)
+        with col_f4:
+            s2_sort_label = st.selectbox("⬇️ 정렬 기준 (Sort By)", ["관련도순", "피인용수 높은 순", "최신순"], index=0)
 
     if st.button("🚀 Semantic Scholar 검색 실행", type="primary", key="btn_s2_search"):
         if not s2_query.strip():
@@ -632,7 +646,8 @@ with tabs[1]:
         else:
             with st.spinner("Semantic Scholar에서 논문을 검색하고 있습니다..."):
                 selected_field_value = field_options[s2_field_label]
-                result_json = search_semantic_scholar(s2_query, limit=s2_limit, year_range=s2_year_range, fields_of_study=selected_field_value)
+                # 파라미터에 sort_by 추가 전달
+                result_json = search_semantic_scholar(s2_query, limit=s2_limit, year_range=s2_year_range, fields_of_study=selected_field_value, sort_by=s2_sort_label)
                 st.session_state['s2_last_result'] = result_json
                 st.session_state['s2_queried'] = True
 
@@ -644,7 +659,7 @@ with tabs[1]:
         else:
             papers = res_data.get("data", [])
             total = res_data.get("total", len(papers))
-            st.markdown(f"##### 📌 Semantic Scholar 검색 결과 (총 {total}건 중 상위 {len(papers)}건 표시)")
+            st.markdown(f"##### 📌 Semantic Scholar 검색 결과 (상위 {len(papers)}건 표시)")
 
             if not papers:
                 st.info("검색된 논문이 없습니다. 검색어 또는 연구 분야를 변경해 보세요.")
