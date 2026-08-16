@@ -265,20 +265,20 @@ def disp(val, default="-"):
 def safe(text):
     return html.escape(str(text))
 
-def scroll_to_top():
-    """[추가] 페이지 하단의 '다음/이전' 버튼을 눌러도 화면이 계속 하단에 머무는 문제 해결.
-    버튼 클릭 시 이 함수를 호출할 플래그만 세팅해두고, 다음 rerun 시작 시점에
-    이 스크립트를 실행해서 화면을 맨 위로 스크롤한다. Streamlit 컴포넌트는 iframe 안에서
-    실행되므로 window.parent를 통해 실제 앱 화면(부모 문서)에 접근해야 함."""
+def scroll_to_results():
+    """[수정] 화면 전체가 아니라 '검색 결과' 영역만 시야에 들어오도록 스크롤.
+    결과 리스트 바로 위에 심어둔 앵커(#db-search-results-anchor)를 찾아서
+    scrollIntoView로 그 지점까지만 이동시킨다. window.parent를 통해 실제
+    앱 화면(부모 문서)에 접근해야 함 (컴포넌트는 iframe 안에서 실행되므로)."""
     components.html(
         """
         <script>
             (function() {
                 var doc = window.parent.document;
-                var candidates = doc.querySelectorAll(
-                    'section.main, [data-testid="stMain"], [data-testid="stAppViewContainer"]'
-                );
-                candidates.forEach(function(el) { el.scrollTo({top: 0, behavior: 'instant'}); });
+                var anchor = doc.getElementById('db-search-results-anchor');
+                if (anchor) {
+                    anchor.scrollIntoView({behavior: 'instant', block: 'start'});
+                }
             })();
         </script>
         """,
@@ -545,10 +545,6 @@ elif input_pw:
 # 메인 화면 구성
 st.title("📚 GBC 연구 논문 DB 관리 시스템")
 
-# [추가] 이전 rerun에서 '페이지 이동' 요청이 있었다면, 이번 rerun 시작 시점에 화면을 맨 위로 스크롤
-if st.session_state.pop('scroll_to_top', False):
-    scroll_to_top()
-
 tab_names = ["🔍 연구 논문 DB 검색", "🌐 Semantic Scholar 검색", "🚀 논문 파일 업로드"]
 if is_admin:
     tab_names.append("⚙️ 관리자 전용 관리 (DB/다운로드)")
@@ -620,6 +616,13 @@ with tabs[0]:
                 if target_col in filtered_df.columns:
                     mask = filtered_df[target_col].fillna("").astype(str).str.replace(" ", "", regex=False).str.lower().str.contains(kw_clean, na=False, regex=False)
                     filtered_df = filtered_df[mask]
+
+        # [추가] 결과 리스트 바로 위에 스크롤 목표 지점(앵커) 삽입.
+        # 앵커가 실제로 렌더링된 '다음'에 스크롤 스크립트를 실행해야
+        # DOM에서 해당 지점을 찾을 수 있으므로 이 위치에서 함께 처리한다.
+        st.markdown('<div id="db-search-results-anchor"></div>', unsafe_allow_html=True)
+        if st.session_state.pop('scroll_to_top', False):
+            scroll_to_results()
 
         st.markdown(f"##### 📌 조회 결과: 총 **{len(filtered_df)}** 건")
         
