@@ -200,8 +200,8 @@ def build_paper_link(row):
     query = urllib.parse.quote(title)
     return f"https://scholar.google.com/scholar?q={query}", "Google Scholar 검색"
 
-# [수정 1] 앱의 멈춤 현상(병목) 방지를 위해 15초 단위 캐싱 적용
-@st.cache_data(ttl=15, show_spinner=False)
+# [수정] 앱 전반의 멈춤 현상(병목) 방지를 위해 300초(5분) 단위 넉넉한 캐싱 적용
+@st.cache_data(ttl=300, show_spinner=False)
 def load_master_excel():
     try:
         file_content = repo.get_contents(EXCEL_FILE_PATH)
@@ -517,8 +517,16 @@ with tabs[0]:
         if filtered_df.empty:
             st.warning("조건에 맞는 논문이 없습니다. 검색어 또는 필드를 변경해 보세요.")
         else:
+            # [수정] UI 렌더링 병목 방지를 위해 최대 50건만 그리기 제한 적용
+            max_render = 50
+            if len(filtered_df) > max_render:
+                st.info(f"⚡ 브라우저 속도 저하 방지를 위해 상위 **{max_render}건**만 화면에 표시합니다. 키워드를 더 상세히 입력해주세요.")
+                render_df = filtered_df.head(max_render)
+            else:
+                render_df = filtered_df
+
             with st.container(height=750, border=False):
-                for idx, row in filtered_df.iterrows():
+                for idx, row in render_df.iterrows():
                     with st.container(border=True):
                         c1, c2 = st.columns([6, 1])
                         
@@ -845,7 +853,6 @@ with tabs[2]:
                         updated_df = pd.concat([updated_df, new_df], ignore_index=True)
 
                     save_master_excel(updated_df, sha)
-                    # [수정 2] 파일 추가 저장 직후 캐시 비우기 (최신 상태 동기화)
                     load_master_excel.clear()
                     status.update(label="전체 파일 처리 및 스마트 DB 저장 완료!", state="complete", expanded=False)
 
@@ -898,7 +905,6 @@ if is_admin:
                     new_df = master_df[master_df['No.'] != del_target_no].reset_index(drop=True)
                     new_df['No.'] = range(1, len(new_df) + 1)
                     save_master_excel(new_df, sha)
-                    # [수정 3] 삭제 후 최신 상태 동기화를 위해 캐시 클리어
                     load_master_excel.clear()
                     st.success(f"No. {del_target_no} 데이터가 삭제되었습니다. 페이지를 새로고침하세요.")
 
@@ -961,7 +967,6 @@ if is_admin:
                             st.write(f"🗑️ 삭제 예정: No.{dno} (완성도 {dcomp}개 필드)")
 
                 if st.button("⚠️ 위 목록대로 중복 삭제 실행 (되돌릴 수 없음)", type="primary"):
-                    # [수정 4] 실제 처리 전후로 캐시를 날려 동기화 강제
                     load_master_excel.clear()
                     fresh_df, fresh_sha = load_master_excel()
                     cleaned = fresh_df[~fresh_df['No.'].isin(drop_nos)].reset_index(drop=True)
