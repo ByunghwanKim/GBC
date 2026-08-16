@@ -9,8 +9,6 @@ import urllib.parse
 import requests
 import datetime
 import time
-import asyncio
-from googletrans import Translator
 import google.generativeai as genai
 from pypdf import PdfReader
 from github import Github
@@ -308,26 +306,28 @@ def search_semantic_scholar(query, limit=10, year_range="전체 기간", max_ret
             return {"error": f"네트워크 오류: {str(e)}"}
     return {"error": "알 수 없는 API 호출 실패"}
 
-# [추가] 구글 번역 라이브러리를 이용한 번역 함수
+# [수정] 표준 구글 번역 API 엔드포인트 연동 (외부 패키지 충돌 원천 방지)
 def translate_via_google(text):
     if not text or text.strip() in ("", "초록 정보가 없습니다."):
         return "번역할 초록 내용이 없습니다."
     try:
-        translator = Translator()
-        # googletrans는 비동기/동기 모두 지원하지만 동기식 호출을 안전하게 수행
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        result = loop.run_until_complete(translator.translate(text, dest='ko'))
-        loop.close()
-        return result.text
+        url = "https://translate.googleapis.com/translate_a/single"
+        params = {
+            "client": "gtx",
+            "sl": "en",
+            "tl": "ko",
+            "dt": "t",
+            "q": text
+        }
+        response = requests.get(url, params=params, timeout=10)
+        if response.status_code == 200:
+            res_json = response.json()
+            translated_sentences = [s[0] for s in res_json[0] if s[0]]
+            return "".join(translated_sentences)
+        else:
+            return f"구글 번역 서버 오류 (코드: {response.status_code})"
     except Exception as e:
-        # 비동기 루프 충돌 방지를 위한 대체 동기식 처리 시도
-        try:
-            translator = Translator()
-            res = translator.translate(text, dest='ko')
-            return res.text
-        except Exception as e2:
-            return f"구글 번역 중 오류가 발생했습니다: {str(e2)}"
+        return f"번역 중 오류가 발생했습니다: {str(e)}"
 
 # 팝업 모달창 (DB 검색용)
 @st.dialog("📖 연구 논문 상세 분석 리포트", width="large")
@@ -535,7 +535,7 @@ with tabs[0]:
                             if st.button("🔍 상세보기", key=f"btn_detail_{idx}_{row['No.']}", use_container_width=True):
                                 show_detail_dialog(row)
 
-# [탭 2] Semantic Scholar 검색 기능 (구글 번역 버튼 연동 완료)
+# [탭 2] Semantic Scholar 검색 기능 (구글 번역 연동)
 with tabs[1]:
     st.subheader("🌐 Semantic Scholar 글로벌 논문 검색")
 
@@ -892,7 +892,7 @@ if is_admin:
                 keep = g_sorted.iloc[0]
                 drops = g_sorted.iloc[1:]
                 keep_rows.append(keep['No.'])
-                drop_rows.extend(drops['No.'].tolist())
+                drop_rows.extend(drops['No.'].tolist()) 취소
                 group_previews.append({
                     'title': keep['논문/도서 제목'],
                     'keep_no': keep['No.'],
