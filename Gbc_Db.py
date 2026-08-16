@@ -306,27 +306,47 @@ def search_semantic_scholar(query, limit=10, year_range="전체 기간", max_ret
             return {"error": f"네트워크 오류: {str(e)}"}
     return {"error": "알 수 없는 API 호출 실패"}
 
-def translate_via_google(text):
+# [수정 1, 2, 3, 4] 구글 번역 함수 고도화: 캐싱 적용, User-Agent 추가, 재시도 로직 추가
+@st.cache_data(ttl=3600, show_spinner=False)
+def translate_via_google(text, max_retries=2):
     if not text or text.strip() in ("", "초록 정보가 없습니다."):
         return "번역할 초록 내용이 없습니다."
-    try:
-        url = "https://translate.googleapis.com/translate_a/single"
-        params = {
-            "client": "gtx",
-            "sl": "en",
-            "tl": "ko",
-            "dt": "t",
-            "q": text
-        }
-        response = requests.get(url, params=params, timeout=10)
-        if response.status_code == 200:
-            res_json = response.json()
-            translated_sentences = [s[0] for s in res_json[0] if s[0]]
-            return "".join(translated_sentences)
-        else:
-            return f"구글 번역 서버 오류 (코드: {response.status_code})"
-    except Exception as e:
-        return f"번역 중 오류가 발생했습니다: {str(e)}"
+    
+    url = "https://translate.googleapis.com/translate_a/single"
+    params = {
+        "client": "gtx",
+        "sl": "en",
+        "tl": "ko",
+        "dt": "t",
+        "q": text
+    }
+    # User-Agent를 브라우저처럼 위장하여 차단 방지
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36"
+    }
+    
+    for attempt in range(max_retries + 1):
+        try:
+            response = requests.get(url, params=params, headers=headers, timeout=10)
+            if response.status_code == 200:
+                res_json = response.json()
+                translated_sentences = [s[0] for s in res_json[0] if s[0]]
+                return "".join(translated_sentences)
+            elif response.status_code == 429:
+                if attempt < max_retries:
+                    time.sleep(2.0)
+                    continue
+                else:
+                    return "API 요청 한도 초과 (429 Too Many Requests). 잠시 후 다시 시도해 주세요."
+            else:
+                return f"구글 번역 서버 오류 (코드: {response.status_code})"
+        except Exception as e:
+            if attempt < max_retries:
+                time.sleep(1.5)
+                continue
+            return f"번역 중 오류가 발생했습니다: {str(e)}"
+            
+    return "알 수 없는 번역 오류"
 
 # 팝업 모달창 (DB 검색용)
 @st.dialog("📖 연구 논문 상세 분석 리포트", width="large")
@@ -404,7 +424,8 @@ def show_s2_abstract_dialog(title, abstract):
         with st.spinner("구글 번역 엔진으로 번역 중입니다..."):
             korean_abstract = translate_via_google(abstract)
                 
-        st.text_area("한글 번역 초록", value=korean_abstract, height=350, label_visibility="collapsed")
+        # [수정] disabled=True 누락 해결 (UI 재실행 방지 및 수정 불가 설정)
+        st.text_area("한글 번역 초록", value=korean_abstract, height=350, disabled=True, label_visibility="collapsed")
 
 # 사이드바 관리자 인증
 st.sidebar.title("🔐 관리자 모드")
