@@ -9,6 +9,8 @@ import urllib.parse
 import requests
 import datetime
 import time
+import asyncio
+from googletrans import Translator
 import google.generativeai as genai
 from pypdf import PdfReader
 from github import Github
@@ -53,7 +55,7 @@ h4 { font-size: 1.05rem !important; font-weight: 700 !important; margin-top: 0.4
     font-size: 15.5px !important; min-height: 46px !important;
 }
 [data-testid="stButton"] button {
-    font-size: 15px !important; padding: 8px 18px !important; border-radius: 8px !important;
+    font-size: 14.5px !important; padding: 10px 16px !important; border-radius: 8px !important; font-weight: 600 !important;
 }
 [data-testid="stAlertContainer"] {
     font-size: 15px !important; padding: 14px 18px !important; border-radius: 10px !important;
@@ -88,6 +90,46 @@ p, li, span, div { line-height: 1.6; color: #1E293B; }
 .badge-mod { background-color: #FFF7ED; color: #C2410C; border: 1px solid #FED7AA; }
 
 .var-text { font-size: 15px; font-weight: 600; color: #334155; margin-right: 18px; display: inline-block; margin-bottom: 8px; }
+
+.custom-action-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 100%;
+    background-color: #FFFFFF;
+    color: #31333F !important;
+    border: 1px solid #D6D6D8;
+    padding: 10px 16px;
+    border-radius: 8px;
+    font-size: 14.5px;
+    font-weight: 600;
+    text-decoration: none !important;
+    box-sizing: border-box;
+    text-align: center;
+    height: 43px;
+    box-shadow: 0 1px 2px rgba(0,0,0,0.02);
+}
+.custom-action-btn:hover {
+    border-color: #FF4B4B;
+    color: #FF4B4B !important;
+    background-color: #FAFAFA;
+}
+.custom-action-disabled {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 100%;
+    background-color: #F8F9FA;
+    color: #9CA3AF !important;
+    border: 1px solid #E5E7EB;
+    padding: 10px 16px;
+    border-radius: 8px;
+    font-size: 14px;
+    font-weight: 500;
+    box-sizing: border-box;
+    text-align: center;
+    height: 43px;
+}
 </style>
 """)
 st.markdown(custom_css, unsafe_allow_html=True)
@@ -124,13 +166,13 @@ def get_available_gemini_model():
         if selected_model:
             return genai.GenerativeModel(
                 model_name=selected_model,
-                generation_config={"temperature": 0.3}
+                generation_config={"temperature": 0.1}
             )
     except Exception:
         pass
     return genai.GenerativeModel(
         model_name='gemini-2.5-flash',
-        generation_config={"temperature": 0.3}
+        generation_config={"temperature": 0.1}
     )
 
 model = get_available_gemini_model()
@@ -266,6 +308,27 @@ def search_semantic_scholar(query, limit=10, year_range="전체 기간", max_ret
             return {"error": f"네트워크 오류: {str(e)}"}
     return {"error": "알 수 없는 API 호출 실패"}
 
+# [추가] 구글 번역 라이브러리를 이용한 번역 함수
+def translate_via_google(text):
+    if not text or text.strip() in ("", "초록 정보가 없습니다."):
+        return "번역할 초록 내용이 없습니다."
+    try:
+        translator = Translator()
+        # googletrans는 비동기/동기 모두 지원하지만 동기식 호출을 안전하게 수행
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        result = loop.run_until_complete(translator.translate(text, dest='ko'))
+        loop.close()
+        return result.text
+    except Exception as e:
+        # 비동기 루프 충돌 방지를 위한 대체 동기식 처리 시도
+        try:
+            translator = Translator()
+            res = translator.translate(text, dest='ko')
+            return res.text
+        except Exception as e2:
+            return f"구글 번역 중 오류가 발생했습니다: {str(e2)}"
+
 # 팝업 모달창 (DB 검색용)
 @st.dialog("📖 연구 논문 상세 분석 리포트", width="large")
 def show_detail_dialog(row):
@@ -326,8 +389,8 @@ def show_detail_dialog(row):
     else:
         st.error("등록된 세부 설문문항 데이터가 없습니다.")
 
-# Semantic Scholar 초록 한글 번역 팝업 모달창
-@st.dialog("🇰🇷 Semantic Scholar 논문 초록 한글 번역", width="large")
+# Semantic Scholar 초록 구글 번역 팝업 모달창
+@st.dialog("🇰🇷 구글 번역 논문 초록 한글 번역", width="large")
 def show_s2_abstract_dialog(title, abstract):
     st.markdown(f"### 📄 {safe(title)}")
     st.divider()
@@ -338,20 +401,9 @@ def show_s2_abstract_dialog(title, abstract):
         st.text_area("영문 초록", value=abstract, height=350, disabled=True, label_visibility="collapsed")
         
     with col_t2:
-        st.markdown("#### 🇰🇷 AI 한글 번역 초록 (Korean Translation)")
-        with st.spinner("Gemini AI가 학술 전문 용어로 번역 중입니다..."):
-            try:
-                trans_prompt = f"""
-                다음은 경영학 및 소비자 행동 연구 논문의 영문 초록입니다. 
-                학술 연구자가 읽기 쉽도록 전문적이고 자연스러운 경영학/방법론 용어를 사용하여 한국어로 번역해주세요.
-                
-                [영문 초록]:
-                {abstract}
-                """
-                res = model.generate_content(trans_prompt)
-                korean_abstract = res.text.strip()
-            except Exception as e:
-                korean_abstract = f"번역 중 오류가 발생했습니다: {str(e)}"
+        st.markdown("#### 🇰🇷 구글 한글 번역 초록 (Google Translation)")
+        with st.spinner("구글 번역 엔진으로 번역 중입니다..."):
+            korean_abstract = translate_via_google(abstract)
                 
         st.text_area("한글 번역 초록", value=korean_abstract, height=350, label_visibility="collapsed")
 
@@ -483,7 +535,7 @@ with tabs[0]:
                             if st.button("🔍 상세보기", key=f"btn_detail_{idx}_{row['No.']}", use_container_width=True):
                                 show_detail_dialog(row)
 
-# [탭 2] Semantic Scholar 검색 기능 (PDF 다운로드와 한글 번역 버튼 가로 정렬 고정)
+# [탭 2] Semantic Scholar 검색 기능 (구글 번역 버튼 연동 완료)
 with tabs[1]:
     st.subheader("🌐 Semantic Scholar 글로벌 논문 검색")
 
@@ -543,23 +595,25 @@ with tabs[1]:
                             st.write(p_abstract)
                             st.divider()
                             
-                            # [수정] 4개 컬럼으로 쪼개서 [Semantic Scholar 페이지], [원문 페이지], [PDF 다운로드], [한글 번역 보기]를 완벽히 가로 한 줄로 배치
                             c_l1, c_l2, c_l3, c_l4 = st.columns(4)
+                            
                             with c_l1:
-                                st.markdown(f"🔗 [S2 페이지]({p_url})", unsafe_allow_html=True)
+                                st.markdown(f"<a class='custom-action-btn' href='{p_url}' target='_blank' rel='noopener noreferrer'>🔗 S2 페이지</a>", unsafe_allow_html=True)
+                                
                             with c_l2:
                                 if pdf_url:
-                                    st.markdown(f"📄 [원문 페이지]({pdf_url})", unsafe_allow_html=True)
+                                    st.markdown(f"<a class='custom-action-btn' href='{pdf_url}' target='_blank' rel='noopener noreferrer'>📄 원문 페이지</a>", unsafe_allow_html=True)
                                 else:
-                                    st.caption("📄 원문 없음")
+                                    st.markdown("<div class='custom-action-disabled'>📄 원문 없음</div>", unsafe_allow_html=True)
+                                    
                             with c_l3:
                                 if pdf_url:
-                                    st.markdown(f"📥 [PDF 다운로드]({pdf_url})", unsafe_allow_html=True)
+                                    st.markdown(f"<a class='custom-action-btn' href='{pdf_url}' target='_blank' rel='noopener noreferrer'>📥 PDF 다운로드</a>", unsafe_allow_html=True)
                                 else:
-                                    st.caption("📥 PDF 없음")
+                                    st.markdown("<div class='custom-action-disabled'>📥 PDF 없음</div>", unsafe_allow_html=True)
+                                    
                             with c_l4:
-                                st.write("")
-                                if st.button("🇰🇷 한글 번역", key=f"btn_trans_{i}_{paper.get('paperId', i)}", use_container_width=True):
+                                if st.button("🇰🇷 구글 번역", key=f"btn_trans_{i}_{paper.get('paperId', i)}", use_container_width=True):
                                     show_s2_abstract_dialog(p_title, p_abstract)
 
 # [탭 3] 논문 파일 업로드 및 분석
