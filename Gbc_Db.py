@@ -165,13 +165,16 @@ def get_available_gemini_model():
         if selected_model:
             return genai.GenerativeModel(
                 model_name=selected_model,
-                generation_config={"temperature": 0.1}
+                # [수정] response_mime_type이 빠져있어 Gemini가 JSON을 마크다운 코드펜스
+                # (```json ... ```)로 감싸 응답하는 경우가 있었고, 그 결과
+                # json.loads()가 "Expecting value: line 1 column 1 (char 0)" 에러를 냈음.
+                generation_config={"temperature": 0.1, "response_mime_type": "application/json"}
             )
     except Exception:
         pass
     return genai.GenerativeModel(
         model_name='gemini-2.5-flash',
-        generation_config={"temperature": 0.1}
+        generation_config={"temperature": 0.1, "response_mime_type": "application/json"}
     )
 
 model = get_available_gemini_model()
@@ -264,6 +267,30 @@ def disp(val, default="-"):
 
 def safe(text):
     return html.escape(str(text))
+
+def parse_gemini_json(raw_text):
+    """[추가] Gemini 응답을 JSON으로 파싱하는 방어 로직.
+    response_mime_type='application/json'을 지정해도 모델이 가끔 앞뒤에
+    마크다운 코드펜스(```json ... ```)나 공백/설명 문구를 붙이는 경우가 있어,
+    그대로 json.loads()하면 'Expecting value: line 1 column 1 (char 0)' 에러가 남.
+    이를 방지하기 위해 코드펜스를 벗겨내고, 그래도 실패하면 첫 '{'부터
+    마지막 '}'까지만 잘라내어 한 번 더 시도한다."""
+    text = raw_text.strip()
+
+    if text.startswith("```"):
+        text = text.strip("`")
+        if text.lower().startswith("json"):
+            text = text[4:]
+        text = text.strip()
+
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        start = text.find("{")
+        end = text.rfind("}")
+        if start != -1 and end != -1 and end > start:
+            return json.loads(text[start:end + 1])
+        raise
 
 def scroll_to_results():
     """[수정] 바깥쪽(브라우저 창) 스크롤과 안쪽(결과 리스트 750px 박스) 스크롤이
@@ -976,7 +1003,7 @@ with tabs[2]:
                         
                         try:
                             response = model.generate_content(prompt)
-                            res_json = json.loads(response.text)
+                            res_json = parse_gemini_json(response.text)
 
                             pdf_title = res_json.get('title', file.name)
                             norm_title = normalize_title(pdf_title)
