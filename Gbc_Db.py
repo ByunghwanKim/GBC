@@ -597,7 +597,7 @@ with tabs[1]:
                             c_l1, c_l2, c_l3, c_l4 = st.columns(4)
                             
                             with c_l1:
-                                st.markdown(f"<a class='custom-action-btn' href='{p_url}' target='_blank' rel='noopener noreferrer'>🔗 S2 페이지</a>", unsafe_allow_html=True)
+                                st.markdown(f"<a class='custom-action-btn' href='{p_url}' target='_blank' rel='noopener noreferrer'>🔗 Semantic Scholar</a>", unsafe_allow_html=True)
                                 
                             with c_l2:
                                 if pdf_url:
