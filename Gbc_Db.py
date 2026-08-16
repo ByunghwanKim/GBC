@@ -328,9 +328,14 @@ def _search_semantic_scholar_cached(query, limit, year_range, fields_of_study, s
                 res_json = response.json()
                 papers = res_json.get("data") or []
 
-                # [추가-4] Open Access(원문 무료 열람 가능) 논문만 남기기
+                # [수정-3] Open Access 필터가 너무 느슨했던 문제 수정.
+                # 기존에는 isOpenAccess(메타데이터상 OA 여부) 또는 openAccessPdf 중
+                # 하나만 있어도 통과시켰는데, isOpenAccess=true여도 실제 PDF 링크가
+                # 없는 경우가 있어 화면엔 "원문 없음" 버튼이 뜨는 모순이 있었음.
+                # 화면의 원문/PDF 버튼은 openAccessPdf.url 유무로만 결정되므로,
+                # 필터도 동일한 기준(실제 접근 가능한 링크가 있는지)으로 맞춤.
                 if open_access_only:
-                    papers = [p for p in papers if p.get("isOpenAccess") or p.get("openAccessPdf")]
+                    papers = [p for p in papers if (p.get("openAccessPdf") or {}).get("url")]
 
                 # [추가-5] 학술지(Journal Article) 논문만 남기기 - 학위논문/기타 유형 제외
                 if journal_only:
