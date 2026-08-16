@@ -445,7 +445,7 @@ if is_admin:
 
 tabs = st.tabs(tab_names)
 
-# [탭 1] 연구 논문 DB 검색 (페이지네이션 적용 완료)
+# [탭 1] 연구 논문 DB 검색
 with tabs[0]:
     st.subheader("🔍 연구 논문 DB 정밀 검색")
     
@@ -544,20 +544,6 @@ with tabs[0]:
             start_idx = (st.session_state['db_page'] - 1) * ITEMS_PER_PAGE
             end_idx = start_idx + ITEMS_PER_PAGE
             render_df = filtered_df.iloc[start_idx:end_idx]
-
-            # 상단 페이지 컨트롤러 UI
-            if total_pages > 1:
-                cp1, cp2, cp3 = st.columns([1, 4, 1])
-                with cp1:
-                    if st.button("◀ 이전 20건", key="prev_top", disabled=(st.session_state['db_page'] == 1), use_container_width=True):
-                        st.session_state['db_page'] -= 1
-                        st.rerun()
-                with cp2:
-                    st.markdown(f"<div style='text-align:center; padding-top:8px; font-weight:600; color:#475569;'>페이지 {st.session_state['db_page']} / {total_pages}</div>", unsafe_allow_html=True)
-                with cp3:
-                    if st.button("다음 20건 ▶", key="next_top", disabled=(st.session_state['db_page'] == total_pages), use_container_width=True):
-                        st.session_state['db_page'] += 1
-                        st.rerun()
 
             # 20건의 데이터 렌더링
             with st.container(height=750, border=False):
