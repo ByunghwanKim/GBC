@@ -881,10 +881,29 @@ with tabs[1]:
 with tabs[2]:
     st.subheader("🚀 논문 파일을 업로드 하세요.")
     st.caption("📂 파일을 올리면 동일 논문 유무를 자동으로 판단하여, 더 충실한 내용으로 스마트 업데이트되거나 신규 등록됩니다.")
+
+    # [추가] 업로드 성공 후 파일 선택 목록을 비우기 위한 장치.
+    # st.file_uploader는 스스로 초기화하는 기능이 없어서, key 값을 바꿔주면
+    # Streamlit이 '새 위젯'으로 인식해 선택 목록이 빈 상태로 다시 렌더링된다.
+    if 'uploader_key_counter' not in st.session_state:
+        st.session_state['uploader_key_counter'] = 0
+
+    # [추가] key가 바뀌면서 위젯이 새로 렌더링되면 직전 rerun의 결과 화면(성공 메시지/로그)이
+    # 같이 날아가므로, 세션에 저장해뒀다가 여기서 한 번 표시하고 지운다.
+    if st.session_state.get('last_upload_summary'):
+        summary = st.session_state.pop('last_upload_summary')
+        st.success(summary['message'])
+        if summary['logs']:
+            with st.expander("📋 상세 처리 결과 로그 보기"):
+                for log in summary['logs']:
+                    st.write(log)
+        if summary['new_entries']:
+            st.dataframe(pd.DataFrame(summary['new_entries']), use_container_width=True)
     
     uploaded_files = st.file_uploader(
         "PDF 또는 Excel 파일을 선택하세요 (다중 선택 가능)", 
         accept_multiple_files=True,
+        key=f"file_uploader_{st.session_state['uploader_key_counter']}",
         help="모바일 기기에서 파일이 보이지 않는 문제를 해결하기 위해 모든 파일 선택이 허용되도록 설정되었습니다. PDF(.pdf) 또는 엑셀(.xlsx) 파일을 선택해주세요."
     )
     
@@ -1074,14 +1093,16 @@ with tabs[2]:
                     load_master_excel.clear()
                     status.update(label="전체 파일 처리 및 스마트 DB 저장 완료!", state="complete", expanded=False)
 
-                    st.success(f"신규 등록 {len(new_entries)}건, 스마트 업데이트 {len(updated_entries)}건이 완료되었습니다.")
-                    
-                    with st.expander("📋 상세 처리 결과 로그 보기"):
-                        for log in processed_logs:
-                            st.write(log)
-
-                    if new_entries:
-                        st.dataframe(pd.DataFrame(new_entries), use_container_width=True)
+                    # [수정] 즉시 표시하지 않고 세션에 저장 - 업로더를 비우기 위해 rerun 하면
+                    # 이 시점에 그려둔 내용은 사라지므로, 다음 rerun 시작 부분에서 다시 그린다.
+                    st.session_state['last_upload_summary'] = {
+                        'message': f"신규 등록 {len(new_entries)}건, 스마트 업데이트 {len(updated_entries)}건이 완료되었습니다.",
+                        'logs': processed_logs,
+                        'new_entries': new_entries,
+                    }
+                    # [추가] 업로더 key를 바꿔서 다음 rerun에서 파일 선택 목록이 비워지도록 함
+                    st.session_state['uploader_key_counter'] += 1
+                    st.rerun()
                 else:
                     status.update(label="추출/병합된 데이터 없음", state="error")
                     if processed_logs:
