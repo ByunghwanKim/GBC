@@ -40,8 +40,7 @@ span.material-icons {
 html, body { font-size: 16px !important; }
 h1 { font-size: 2rem !important; font-weight: 800 !important; }
 h2 { font-size: 1.4rem !important; font-weight: 700 !important; }
-h3 { font-size: 1.2rem !important; font-weight: 700 !important; }
-h4 { font-size: 1.05rem !important; font-weight: 700 !important; margin-top: 0.4rem !important; margin-bottom: 0.6rem !important; }
+h3 { font-size: 1.2rem !important; font-weight: 700 !important; margin-top: 0.4rem !important; margin-bottom: 0.6rem !important; }
 
 [data-testid="stTab"] p { font-size: 15.5px !important; font-weight: 600 !important; }
 [data-testid="stContainer"] { padding: 4px 2px; }
@@ -358,10 +357,6 @@ def citations_per_year(paper, current_year=None):
 def _search_semantic_scholar_cached(query, limit, year_range, fields_of_study, sort_by, max_retries,
                                      open_access_only=False, journal_only=False):
     query_stripped = query.strip()
-    
-    # [수정] Semantic Scholar의 스마트 알고리즘(오타 교정, 퍼지 매칭)이 정상 작동하도록
-    # 강제로 따옴표("")를 씌우는 로직을 제거했습니다.
-    # 이제 사용자가 입력한 그대로(띄어쓰기 등 무시하고) 엔진에 전달됩니다.
     query_for_api = query_stripped
 
     api_limit = 100 if sort_by != "순수 관련도순" else limit
@@ -405,9 +400,6 @@ def _search_semantic_scholar_cached(query, limit, year_range, fields_of_study, s
 
                 if journal_only:
                     papers = [p for p in papers if p.get("publicationTypes") and "JournalArticle" in p.get("publicationTypes")]
-
-                # [수정] 지나치게 엄격했던 클라이언트 측 필터링(띄어쓰기 제거 후 강제 100% 매칭 검사)을 완전 삭제.
-                # S2의 자체 Relevance 검색 엔진이 찾아낸 결과를 그대로 신뢰하여 활용합니다.
 
                 if sort_by == "관련도 + 연차대비 영향력 (기본)":
                     top_relevant = papers[:50]
@@ -1002,10 +994,32 @@ with tabs[2]:
                         {text[:100000]}
                         """
                         
-                        try:
-                            response = model.generate_content(prompt)
-                            res_json = parse_gemini_json(response.text)
+                        # [추가] 429 API Rate Limit 방어를 위한 스마트 재시도 로직
+                        max_api_retries = 3
+                        res_json = None
+                        
+                        for attempt in range(max_api_retries):
+                            try:
+                                response = model.generate_content(prompt)
+                                res_json = parse_gemini_json(response.text)
+                                break  # 성공 시 루프 탈출
+                            except Exception as api_e:
+                                err_str = str(api_e)
+                                # 429 Quota Exceeded 에러일 경우 15초 대기 후 재시도
+                                if "429" in err_str or "Quota" in err_str:
+                                    if attempt < max_api_retries - 1:
+                                        wait_time = 15
+                                        st.write(f"⏳ API 무료 할당량 도달. {wait_time}초 대기 후 안전하게 재시도합니다... ({attempt+1}/{max_api_retries})")
+                                        time.sleep(wait_time)
+                                        continue
+                                # 다른 에러이거나 최대 재시도 횟수 초과 시 완전 예외 발생
+                                raise Exception(err_str)
 
+                        if not res_json:
+                            st.error(f"'{file.name}' JSON 파싱 최종 실패")
+                            continue
+
+                        try:
                             pdf_title = res_json.get('title', file.name)
                             norm_title = normalize_title(pdf_title)
 
