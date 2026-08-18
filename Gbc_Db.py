@@ -133,15 +133,51 @@ p, li, span, div { line-height: 1.6; color: #1E293B; }
 """)
 st.markdown(custom_css, unsafe_allow_html=True)
 
+# 2. 시스템 시크릿 키 로드
 try:
     GEMINI_API_KEY = st.secrets["GEMINI_API_KEY"]
     GITHUB_TOKEN = st.secrets["GITHUB_TOKEN"]
     GITHUB_REPO = st.secrets["GITHUB_REPO"]
     ADMIN_PASSWORD = st.secrets.get("ADMIN_PASSWORD", "")
     S2_API_KEY = st.secrets.get("S2_API_KEY", "")
+    # [추가] 앱 전체 접속용 비밀번호 (기본값 설정)
+    APP_PASSWORD = st.secrets.get("APP_PASSWORD", "gbc1234!")
 except Exception:
     st.error("⚠️ Streamlit Secrets 설정을 확인해주세요.")
     st.stop()
+
+
+# ==========================================
+# [전체 잠금 구현] 로그인 인증 로직
+# ==========================================
+if "authenticated" not in st.session_state:
+    st.session_state["authenticated"] = False
+
+if not st.session_state["authenticated"]:
+    # 화면 중앙 배치를 위한 빈 컬럼 구성
+    _, col_login, _ = st.columns([1, 2, 1])
+    
+    with col_login:
+        st.markdown("<br><br><br>", unsafe_allow_html=True)
+        st.title("🔒 GBC 연구 논문 DB")
+        st.markdown("이 시스템은 인가된 사용자만 접근할 수 있는 비공개 데이터베이스입니다.")
+        
+        # 폼(Form)을 사용하면 입력 후 엔터(Enter) 키로 바로 로그인 가능
+        with st.form("login_form"):
+            pw = st.text_input("접속 비밀번호를 입력하세요", type="password", placeholder="비밀번호 입력")
+            submitted = st.form_submit_button("로그인", use_container_width=True)
+            
+            if submitted:
+                if pw == APP_PASSWORD:
+                    st.session_state["authenticated"] = True
+                    st.rerun()
+                else:
+                    st.error("❌ 비밀번호가 일치하지 않습니다.")
+                    
+    # 인증에 성공하지 않으면 여기서 스크립트 실행을 완전히 멈춤 (보안 핵심)
+    st.stop()
+# ==========================================
+
 
 # Gemini AI 설정
 genai.configure(api_key=GEMINI_API_KEY)
@@ -165,9 +201,6 @@ def get_available_gemini_model():
         if selected_model:
             return genai.GenerativeModel(
                 model_name=selected_model,
-                # [수정] response_mime_type이 빠져있어 Gemini가 JSON을 마크다운 코드펜스
-                # (```json ... ```)로 감싸 응답하는 경우가 있었고, 그 결과
-                # json.loads()가 "Expecting value: line 1 column 1 (char 0)" 에러를 냈음.
                 generation_config={"temperature": 0.1, "response_mime_type": "application/json"}
             )
     except Exception:
@@ -269,12 +302,6 @@ def safe(text):
     return html.escape(str(text))
 
 def parse_gemini_json(raw_text):
-    """[추가] Gemini 응답을 JSON으로 파싱하는 방어 로직.
-    response_mime_type='application/json'을 지정해도 모델이 가끔 앞뒤에
-    마크다운 코드펜스(```json ... ```)나 공백/설명 문구를 붙이는 경우가 있어,
-    그대로 json.loads()하면 'Expecting value: line 1 column 1 (char 0)' 에러가 남.
-    이를 방지하기 위해 코드펜스를 벗겨내고, 그래도 실패하면 첫 '{'부터
-    마지막 '}'까지만 잘라내어 한 번 더 시도한다."""
     text = raw_text.strip()
 
     if text.startswith("```"):
@@ -293,11 +320,6 @@ def parse_gemini_json(raw_text):
         raise
 
 def scroll_to_results():
-    """[수정] 바깥쪽(브라우저 창) 스크롤과 안쪽(결과 리스트 750px 박스) 스크롤이
-    따로 놀던 문제를 하나로 합침. 앵커(#db-search-results-anchor)로 바깥쪽 스크롤을
-    이동시키는 동시에, 그 근처에서 실제로 내부 스크롤이 걸려있는 요소(scrollHeight >
-    clientHeight)를 찾아 scrollTop을 0으로 리셋한다. window.parent를 통해 실제
-    앱 화면(부모 문서)에 접근해야 함 (컴포넌트는 iframe 안에서 실행되므로)."""
     components.html(
         """
         <script>
@@ -306,11 +328,8 @@ def scroll_to_results():
                 var anchor = doc.getElementById('db-search-results-anchor');
                 if (!anchor) { return; }
 
-                // 1) 바깥쪽(브라우저 창) 스크롤: 앵커 지점으로 이동
                 anchor.scrollIntoView({behavior: 'instant', block: 'start'});
 
-                // 2) 안쪽 스크롤: 앵커 근처(형제/부모 범위)에서 실제로 내부 스크롤이
-                //    걸려있는 요소를 찾아 맨 위로 리셋
                 var scope = anchor.parentElement ? anchor.parentElement.parentElement : null;
                 if (scope) {
                     var all = scope.querySelectorAll('div');
@@ -327,19 +346,9 @@ def scroll_to_results():
     )
 
 class SearchAPIError(Exception):
-    """[추가] 검색/번역 API가 실패했을 때 쓰는 전용 예외.
-    @st.cache_data는 함수가 예외를 던지면 그 실행을 캐싱하지 않으므로,
-    이 예외를 쓰면 '실패했다는 사실'이 캐시에 갇히지 않고 매번 새로 재시도된다."""
     pass
 
-# [수정] 429 등 실패 상황에서는 dict를 반환하지 않고 SearchAPIError를 raise 하도록 변경.
-# 이유: @st.cache_data(ttl=600)가 걸려있으면 '정상 반환값'은 뭐든 캐싱되는데,
-# 기존처럼 {"error": ...}를 반환하면 그 에러 자체가 10분간 캐싱되어
-# 재시도 로직이 사실상 무력화되는 문제가 있었음(관련 실패는 캐싱하지 않아야 함).
 def citations_per_year(paper, current_year=None):
-    """[추가-1] 연차 대비 인용 영향력 계산.
-    오래된 논문일수록 절대 인용수가 자연스럽게 높아지는 편향을 보정하기 위해,
-    citationCount를 발행 이후 경과 연수로 나눈다. year 정보가 없으면 원래 값을 그대로 사용."""
     if current_year is None:
         current_year = datetime.datetime.now().year
     c = paper.get("citationCount") or 0
@@ -349,29 +358,18 @@ def citations_per_year(paper, current_year=None):
     age = max(1, current_year - y + 1)
     return c / age
 
-
 @st.cache_data(ttl=600, show_spinner=False)
 def _search_semantic_scholar_cached(query, limit, year_range, fields_of_study, sort_by, max_retries,
                                      open_access_only=False, journal_only=False):
-    # [추가] 검색어가 여러 단어(구문)인지 판별. 예: "Uncanny Valley" -> True, "NFC" -> False
     query_stripped = query.strip()
     is_phrase = ' ' in query_stripped
-    phrase_norm = query_stripped.replace(" ", "").lower()  # 탭1(로컬 DB 검색)과 동일한 정규화 방식
+    phrase_norm = query_stripped.replace(" ", "").lower()
 
-    # [수정] 구문 검색일 때는 정렬 방식과 무관하게 후보군을 넉넉히 받아온다.
-    # API 단계에서 걸러지지 않더라도, 아래에서 클라이언트가 다시 한번 정확히 걸러내기 때문에
-    # 후보군이 너무 적으면(예: limit=5) 필터링 후 결과가 텅 빌 수 있음.
     api_limit = limit if (sort_by == "순수 관련도순" and not is_phrase) else 100
 
-    # [수정] 여러 단어로 이루어진 검색어("Uncanny Valley" 등)를 그냥 보내면
-    # Semantic Scholar가 각 단어를 독립적으로 매칭해 관련 없는 결과까지 섞여 나올 수 있다.
-    # 공식 튜토리얼은 "Paper Bulk Search" 엔드포인트 기준으로 따옴표 구문 검색을 안내하고 있고,
-    # 저희가 쓰는 "Paper Relevance Search"(/paper/search) 엔드포인트에서 동일하게 보장되는지는
-    # 공식 문서상 명확하지 않다. 그래서 따옴표는 일단 시도(도움이 될 수도 있어 유지)하되,
-    # API가 이를 무시하더라도 결과가 정확하도록 아래에서 클라이언트 쪽 필터를 별도로 건다.
     query_for_api = f'"{query_stripped}"' if is_phrase else query_stripped
 
-    url = (f"https://api.semanticscholar.org/graph/v1/paper/search?query={urllib.parse.quote(query_for_api)}"
+    url = (f"[https://api.semanticscholar.org/graph/v1/paper/search?query=](https://api.semanticscholar.org/graph/v1/paper/search?query=){urllib.parse.quote(query_for_api)}"
            f"&limit={api_limit}&fields=title,authors,year,venue,abstract,url,citationCount,"
            f"isOpenAccess,openAccessPdf,tldr,publicationTypes")
 
@@ -405,22 +403,12 @@ def _search_semantic_scholar_cached(query, limit, year_range, fields_of_study, s
                 res_json = response.json()
                 papers = res_json.get("data") or []
 
-                # [수정-3] Open Access 필터가 너무 느슨했던 문제 수정.
-                # 기존에는 isOpenAccess(메타데이터상 OA 여부) 또는 openAccessPdf 중
-                # 하나만 있어도 통과시켰는데, isOpenAccess=true여도 실제 PDF 링크가
-                # 없는 경우가 있어 화면엔 "원문 없음" 버튼이 뜨는 모순이 있었음.
-                # 화면의 원문/PDF 버튼은 openAccessPdf.url 유무로만 결정되므로,
-                # 필터도 동일한 기준(실제 접근 가능한 링크가 있는지)으로 맞춤.
                 if open_access_only:
                     papers = [p for p in papers if (p.get("openAccessPdf") or {}).get("url")]
 
-                # [추가-5] 학술지(Journal Article) 논문만 남기기 - 학위논문/기타 유형 제외
                 if journal_only:
                     papers = [p for p in papers if p.get("publicationTypes") and "JournalArticle" in p.get("publicationTypes")]
 
-                # [추가] 구문 검색 클라이언트 재검증. API가 따옴표를 지원하든 안 하든
-                # 상관없이, 제목 또는 초록에 검색어가 '붙어있는 구문'으로 실제 존재하는
-                # 논문만 최종적으로 남긴다 (탭1 로컬 DB 검색과 동일한 판정 방식).
                 if is_phrase:
                     def _contains_phrase(p):
                         combined = (str(p.get("title") or "") + " " + str(p.get("abstract") or ""))
@@ -428,9 +416,6 @@ def _search_semantic_scholar_cached(query, limit, year_range, fields_of_study, s
                         return phrase_norm in combined_norm
                     papers = [p for p in papers if _contains_phrase(p)]
 
-                # [수정-1] 피인용수 기반 정렬에는 절대값 대신 '연차 대비 정규화' 값을 사용
-                # [수정-2] "관련도 및 피인용 최상위(기본)"와 "연차 대비 영향력 높은 순"이
-                # 둘 다 citations_per_year를 쓰면서 사실상 비슷해져서 하나로 통합함.
                 if sort_by == "관련도 + 연차대비 영향력 (기본)":
                     top_relevant = papers[:50]
                     top_relevant.sort(key=lambda x: citations_per_year(x), reverse=True)
@@ -461,10 +446,6 @@ def _search_semantic_scholar_cached(query, limit, year_range, fields_of_study, s
 
 def search_semantic_scholar(query, limit=10, year_range="전체 기간", fields_of_study="", sort_by="관련도 + 연차대비 영향력 (기본)", max_retries=3,
                              open_access_only=False, journal_only=False):
-    """[수정] 캐싱되는 내부 함수를 감싸는 얇은 래퍼.
-    성공 시에는 캐싱된 결과를 그대로 돌려주고, 실패(SearchAPIError) 시에는
-    호출부가 기대하는 {"error": "..."} 형태로 변환해서 돌려준다.
-    이렇게 하면 '실패 자체'는 캐싱되지 않고, 매 호출마다 다시 시도된다."""
     try:
         return _search_semantic_scholar_cached(query, limit, year_range, fields_of_study, sort_by, max_retries,
                                                 open_access_only, journal_only)
@@ -472,10 +453,9 @@ def search_semantic_scholar(query, limit=10, year_range="전체 기간", fields_
         return {"error": str(e)}
 
 
-# [수정] 번역도 동일한 패턴 적용: 실패는 캐싱하지 않고 raise, 성공만 캐싱.
 @st.cache_data(ttl=3600, show_spinner=False)
 def _translate_via_google_cached(text, max_retries):
-    url = "https://translate.googleapis.com/translate_a/single"
+    url = "[https://translate.googleapis.com/translate_a/single](https://translate.googleapis.com/translate_a/single)"
     params = {
         "client": "gtx",
         "sl": "en",
@@ -514,7 +494,6 @@ def _translate_via_google_cached(text, max_retries):
 
 
 def translate_via_google(text, max_retries=2):
-    """[수정] 캐싱되는 내부 함수를 감싸는 얇은 래퍼 - 실패를 캐싱에서 분리."""
     if not text or text.strip() in ("", "초록 정보가 없습니다."):
         return "번역할 초록 내용이 없습니다."
     try:
@@ -683,9 +662,6 @@ with tabs[0]:
                     mask = filtered_df[target_col].fillna("").astype(str).str.replace(" ", "", regex=False).str.lower().str.contains(kw_clean, na=False, regex=False)
                     filtered_df = filtered_df[mask]
 
-        # [추가] 결과 리스트 바로 위에 스크롤 목표 지점(앵커) 삽입.
-        # 앵커가 실제로 렌더링된 '다음'에 스크롤 스크립트를 실행해야
-        # DOM에서 해당 지점을 찾을 수 있으므로 이 위치에서 함께 처리한다.
         st.markdown('<div id="db-search-results-anchor"></div>', unsafe_allow_html=True)
         if st.session_state.pop('scroll_to_top', False):
             scroll_to_results()
@@ -757,7 +733,6 @@ with tabs[0]:
                             if st.button("🔍 상세보기", key=f"btn_detail_{idx}_{row['No.']}", use_container_width=True):
                                 show_detail_dialog(row)
 
-            # 하단 페이지 컨트롤러 UI
             if total_pages > 1:
                 st.divider()
                 cp4, cp5, cp6 = st.columns([1, 4, 1])
@@ -801,11 +776,8 @@ with tabs[1]:
         with col_f3:
             s2_field_label = st.selectbox("📚 연구 분야 (Category)", list(field_options.keys()), index=3)
         with col_f4:
-            # [수정-2] "관련도 + 피인용" 기본안과 "연차 대비 영향력순"이 비슷해져서 하나로 통합.
-            # 이제 정렬 옵션은 3개: 기본(관련도+연차대비 영향력) / 순수 관련도순 / 최신순
             s2_sort_label = st.selectbox("⬇️ 정렬 기준 (Sort By)", ["관련도 + 연차대비 영향력 (기본)", "순수 관련도순", "최신순"], index=0)
 
-        # [추가-4, 5] Open Access / 학술지 논문만 보기 필터
         col_c1, col_c2 = st.columns(2)
         with col_c1:
             s2_open_access_only = st.checkbox("🔓 원문 무료 열람 가능(Open Access)만 보기")
@@ -839,8 +811,6 @@ with tabs[1]:
             if not papers:
                 st.info("검색된 논문이 없습니다. 검색어 또는 연구 분야를 변경해 보세요.")
             else:
-                # [추가-3] 이미 GBC DB에 등록된 논문인지 대조하기 위해 마스터 DB 로드
-                # (load_master_excel은 캐싱되어 있어 비용이 크지 않음)
                 s2_dup_check_df, _ = load_master_excel()
 
                 for i, paper in enumerate(papers):
@@ -863,7 +833,6 @@ with tabs[1]:
                     pdf_info = paper.get("openAccessPdf")
                     pdf_url = pdf_info.get("url") if pdf_info else None
 
-                    # [추가-3] 제목 기준 중복 대조 (기존 normalize_title/find_duplicate_row 재사용)
                     dup_row = find_duplicate_row(p_title, s2_dup_check_df) if not s2_dup_check_df.empty else None
 
                     with st.container(border=True):
@@ -907,14 +876,9 @@ with tabs[2]:
     st.subheader("🚀 논문 파일을 업로드 하세요.")
     st.caption("📂 파일을 올리면 동일 논문 유무를 자동으로 판단하여, 더 충실한 내용으로 스마트 업데이트되거나 신규 등록됩니다.")
 
-    # [추가] 업로드 성공 후 파일 선택 목록을 비우기 위한 장치.
-    # st.file_uploader는 스스로 초기화하는 기능이 없어서, key 값을 바꿔주면
-    # Streamlit이 '새 위젯'으로 인식해 선택 목록이 빈 상태로 다시 렌더링된다.
     if 'uploader_key_counter' not in st.session_state:
         st.session_state['uploader_key_counter'] = 0
 
-    # [추가] key가 바뀌면서 위젯이 새로 렌더링되면 직전 rerun의 결과 화면(성공 메시지/로그)이
-    # 같이 날아가므로, 세션에 저장해뒀다가 여기서 한 번 표시하고 지운다.
     if st.session_state.get('last_upload_summary'):
         summary = st.session_state.pop('last_upload_summary')
         st.success(summary['message'])
@@ -1118,14 +1082,11 @@ with tabs[2]:
                     load_master_excel.clear()
                     status.update(label="전체 파일 처리 및 스마트 DB 저장 완료!", state="complete", expanded=False)
 
-                    # [수정] 즉시 표시하지 않고 세션에 저장 - 업로더를 비우기 위해 rerun 하면
-                    # 이 시점에 그려둔 내용은 사라지므로, 다음 rerun 시작 부분에서 다시 그린다.
                     st.session_state['last_upload_summary'] = {
                         'message': f"신규 등록 {len(new_entries)}건, 스마트 업데이트 {len(updated_entries)}건이 완료되었습니다.",
                         'logs': processed_logs,
                         'new_entries': new_entries,
                     }
-                    # [추가] 업로더 key를 바꿔서 다음 rerun에서 파일 선택 목록이 비워지도록 함
                     st.session_state['uploader_key_counter'] += 1
                     st.rerun()
                 else:
