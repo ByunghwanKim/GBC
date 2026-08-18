@@ -11,6 +11,7 @@ import requests
 import datetime
 import time
 import google.generativeai as genai
+from google.api_core.exceptions import ResourceExhausted
 from pypdf import PdfReader
 from github import Github
 from github.GithubException import UnknownObjectException
@@ -178,9 +179,14 @@ if not st.session_state["authenticated"]:
 # Gemini AI 설정
 genai.configure(api_key=GEMINI_API_KEY)
 
+# [추가] 무료 티어 할당량이 모델마다 다르므로, 할당량 초과 시 순서대로 넘어갈 수 있게
+# 우선순위 리스트를 별도로 보관 (get_available_gemini_model은 이 중 '가장 좋은' 1개만
+# 선택하지만, 할당량 소진 시 generate_content_with_fallback()이 이 리스트를 순회한다)
+GEMINI_MODEL_PRIORITY = ['gemini-3.6-flash', 'gemini-3.7-flash', 'gemini-3.5-flash', 'gemini-2.5-flash', 'gemini-2.0-flash']
+
 @st.cache_resource
 def get_available_gemini_model():
-    preferred_models = ['gemini-3.6-flash', 'gemini-3.7-flash', 'gemini-3.5-flash', 'gemini-2.5-flash']
+    preferred_models = GEMINI_MODEL_PRIORITY
     try:
         available_models = [
             m.name.replace("models/", "")
@@ -207,6 +213,57 @@ def get_available_gemini_model():
     )
 
 model = get_available_gemini_model()
+
+@st.cache_resource
+def _get_fallback_model_pool():
+    """[추가] GEMINI_MODEL_PRIORITY에 있는 모델들을 미리 GenerativeModel 객체로 만들어둠.
+    기본 모델(model)이 할당량 초과로 막히면 이 풀에서 순서대로 다음 모델을 시도한다."""
+    pool = {}
+    for name in GEMINI_MODEL_PRIORITY:
+        try:
+            pool[name] = genai.GenerativeModel(
+                model_name=name,
+                generation_config={"temperature": 0.1, "response_mime_type": "application/json"}
+            )
+        except Exception:
+            continue
+    return pool
+
+def generate_content_with_fallback(prompt, max_retries_per_model=2):
+    """[추가] Gemini 할당량 초과(ResourceExhausted, 429) 대응.
+    1) 같은 모델로 짧게 재시도 (일시적 분당 한도 초과일 수 있으므로)
+    2) 그래도 안 되면(일일 한도 소진 등) 우선순위상 다음 모델로 자동 전환
+    3) 모든 모델이 다 막히면 마지막 에러를 그대로 올려서 호출부가 사용자에게 알리게 함
+    """
+    pool = _get_fallback_model_pool()
+    ordered_models = [model] + [m for name, m in pool.items() if m is not model]
+
+    last_error = None
+    for candidate in ordered_models:
+        for attempt in range(max_retries_per_model):
+            try:
+                return candidate.generate_content(prompt)
+            except ResourceExhausted as e:
+                last_error = e
+                msg = str(e)
+                # 메시지에 담긴 "Please retry in X.Xs" 힌트를 읽어서 그만큼만 대기 (없으면 기본 backoff)
+                wait_s = 5.0 * (attempt + 1)
+                if "retry in" in msg:
+                    try:
+                        wait_s = float(msg.split("retry in")[1].split("s")[0].strip())
+                    except Exception:
+                        pass
+                # 하루 단위 할당량(PerDay)까지 소진된 경우는 같은 모델을 더 기다려봐야 소용없으므로
+                # 바로 다음 모델로 넘어감. 분당/짧은 한도로 보이면 안내된 시간만큼 대기 후 재시도.
+                if "PerDay" in msg:
+                    break
+                time.sleep(min(wait_s, 15.0))
+                continue
+            except Exception as e:
+                # 할당량 문제가 아닌 다른 오류는 폴백해도 소용없으므로 즉시 올림
+                raise
+    # 모든 모델/재시도가 실패
+    raise last_error if last_error else RuntimeError("Gemini 모델 호출에 모두 실패했습니다.")
 
 # GitHub 저장소 설정
 repo = Github(GITHUB_TOKEN).get_repo(GITHUB_REPO)
@@ -358,15 +415,18 @@ def citations_per_year(paper, current_year=None):
 def _search_semantic_scholar_cached(query, limit, year_range, fields_of_study, sort_by, max_retries,
                                      open_access_only=False, journal_only=False):
     query_stripped = query.strip()
-    
-    # [수정] Semantic Scholar의 스마트 알고리즘(오타 교정, 퍼지 매칭)이 정상 작동하도록
+
+    # Semantic Scholar의 스마트 알고리즘(오타 교정, 퍼지 매칭)이 정상 작동하도록
     # 강제로 따옴표("")를 씌우는 로직을 제거했습니다.
     # 이제 사용자가 입력한 그대로(띄어쓰기 등 무시하고) 엔진에 전달됩니다.
     query_for_api = query_stripped
 
     api_limit = 100 if sort_by != "순수 관련도순" else limit
 
-    url = (f"[https://api.semanticscholar.org/graph/v1/paper/search?query=](https://api.semanticscholar.org/graph/v1/paper/search?query=){urllib.parse.quote(query_for_api)}"
+    # [수정] 마크다운 링크 문법이 문자열 안에 그대로 섞여 들어가 있던 것을 제거.
+    # ("[https://...](https://...)"처럼 되어 있으면 실제 URL이 아니라 텍스트라서
+    # 요청 자체가 실패합니다.)
+    url = (f"https://api.semanticscholar.org/graph/v1/paper/search?query={urllib.parse.quote(query_for_api)}"
            f"&limit={api_limit}&fields=title,authors,year,venue,abstract,url,citationCount,"
            f"isOpenAccess,openAccessPdf,tldr,publicationTypes")
 
@@ -405,9 +465,6 @@ def _search_semantic_scholar_cached(query, limit, year_range, fields_of_study, s
 
                 if journal_only:
                     papers = [p for p in papers if p.get("publicationTypes") and "JournalArticle" in p.get("publicationTypes")]
-
-                # [수정] 지나치게 엄격했던 클라이언트 측 필터링(띄어쓰기 제거 후 강제 100% 매칭 검사)을 완전 삭제.
-                # S2의 자체 Relevance 검색 엔진이 찾아낸 결과를 그대로 신뢰하여 활용합니다.
 
                 if sort_by == "관련도 + 연차대비 영향력 (기본)":
                     top_relevant = papers[:50]
@@ -448,7 +505,8 @@ def search_semantic_scholar(query, limit=10, year_range="전체 기간", fields_
 
 @st.cache_data(ttl=3600, show_spinner=False)
 def _translate_via_google_cached(text, max_retries):
-    url = "[https://translate.googleapis.com/translate_a/single](https://translate.googleapis.com/translate_a/single)"
+    # [수정] 마크다운 링크 문법이 섞여 들어가 있던 것을 제거 (실제 URL로 복구)
+    url = "https://translate.googleapis.com/translate_a/single"
     params = {
         "client": "gtx",
         "sl": "en",
@@ -1003,7 +1061,10 @@ with tabs[2]:
                         """
                         
                         try:
-                            response = model.generate_content(prompt)
+                            # [수정] model.generate_content() 직접 호출 대신
+                            # generate_content_with_fallback() 사용 - 할당량 초과 시
+                            # 자동으로 재시도하거나 다른 모델로 넘어감
+                            response = generate_content_with_fallback(prompt)
                             res_json = parse_gemini_json(response.text)
 
                             pdf_title = res_json.get('title', file.name)
@@ -1051,6 +1112,10 @@ with tabs[2]:
                                 titles_seen_this_batch.add(norm_title)
                             processed_logs.append(f"✅ [신규 등록] No.{current_max_no} '{pdf_title}'")
                             st.write(f"✅ '{file.name}' 분석 완료!")
+                        except ResourceExhausted:
+                            # [추가] 모든 폴백 모델까지 다 막힌 경우의 사용자 안내
+                            st.error(f"'{file.name}' 분석 실패: Gemini API 할당량이 모두 소진되었습니다. "
+                                     f"Google AI Studio에서 결제(빌링)를 활성화하시거나, 잠시(보통 다음날) 후 다시 시도해주세요.")
                         except Exception as e:
                             st.error(f"'{file.name}' 분석 중 오류: {str(e)}")
 
