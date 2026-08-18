@@ -353,10 +353,25 @@ def citations_per_year(paper, current_year=None):
 @st.cache_data(ttl=600, show_spinner=False)
 def _search_semantic_scholar_cached(query, limit, year_range, fields_of_study, sort_by, max_retries,
                                      open_access_only=False, journal_only=False):
-    api_limit = limit if sort_by == "순수 관련도순" else 100
+    # [추가] 검색어가 여러 단어(구문)인지 판별. 예: "Uncanny Valley" -> True, "NFC" -> False
+    query_stripped = query.strip()
+    is_phrase = ' ' in query_stripped
+    phrase_norm = query_stripped.replace(" ", "").lower()  # 탭1(로컬 DB 검색)과 동일한 정규화 방식
 
-    # [추가-2] tldr(AI 한줄요약), publicationTypes(논문 유형) 필드 추가 요청
-    url = (f"https://api.semanticscholar.org/graph/v1/paper/search?query={urllib.parse.quote(query)}"
+    # [수정] 구문 검색일 때는 정렬 방식과 무관하게 후보군을 넉넉히 받아온다.
+    # API 단계에서 걸러지지 않더라도, 아래에서 클라이언트가 다시 한번 정확히 걸러내기 때문에
+    # 후보군이 너무 적으면(예: limit=5) 필터링 후 결과가 텅 빌 수 있음.
+    api_limit = limit if (sort_by == "순수 관련도순" and not is_phrase) else 100
+
+    # [수정] 여러 단어로 이루어진 검색어("Uncanny Valley" 등)를 그냥 보내면
+    # Semantic Scholar가 각 단어를 독립적으로 매칭해 관련 없는 결과까지 섞여 나올 수 있다.
+    # 공식 튜토리얼은 "Paper Bulk Search" 엔드포인트 기준으로 따옴표 구문 검색을 안내하고 있고,
+    # 저희가 쓰는 "Paper Relevance Search"(/paper/search) 엔드포인트에서 동일하게 보장되는지는
+    # 공식 문서상 명확하지 않다. 그래서 따옴표는 일단 시도(도움이 될 수도 있어 유지)하되,
+    # API가 이를 무시하더라도 결과가 정확하도록 아래에서 클라이언트 쪽 필터를 별도로 건다.
+    query_for_api = f'"{query_stripped}"' if is_phrase else query_stripped
+
+    url = (f"https://api.semanticscholar.org/graph/v1/paper/search?query={urllib.parse.quote(query_for_api)}"
            f"&limit={api_limit}&fields=title,authors,year,venue,abstract,url,citationCount,"
            f"isOpenAccess,openAccessPdf,tldr,publicationTypes")
 
@@ -402,6 +417,16 @@ def _search_semantic_scholar_cached(query, limit, year_range, fields_of_study, s
                 # [추가-5] 학술지(Journal Article) 논문만 남기기 - 학위논문/기타 유형 제외
                 if journal_only:
                     papers = [p for p in papers if p.get("publicationTypes") and "JournalArticle" in p.get("publicationTypes")]
+
+                # [추가] 구문 검색 클라이언트 재검증. API가 따옴표를 지원하든 안 하든
+                # 상관없이, 제목 또는 초록에 검색어가 '붙어있는 구문'으로 실제 존재하는
+                # 논문만 최종적으로 남긴다 (탭1 로컬 DB 검색과 동일한 판정 방식).
+                if is_phrase:
+                    def _contains_phrase(p):
+                        combined = (str(p.get("title") or "") + " " + str(p.get("abstract") or ""))
+                        combined_norm = combined.replace(" ", "").lower()
+                        return phrase_norm in combined_norm
+                    papers = [p for p in papers if _contains_phrase(p)]
 
                 # [수정-1] 피인용수 기반 정렬에는 절대값 대신 '연차 대비 정규화' 값을 사용
                 # [수정-2] "관련도 및 피인용 최상위(기본)"와 "연차 대비 영향력 높은 순"이
