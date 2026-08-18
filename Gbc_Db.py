@@ -40,7 +40,8 @@ span.material-icons {
 html, body { font-size: 16px !important; }
 h1 { font-size: 2rem !important; font-weight: 800 !important; }
 h2 { font-size: 1.4rem !important; font-weight: 700 !important; }
-h3 { font-size: 1.2rem !important; font-weight: 700 !important; margin-top: 0.4rem !important; margin-bottom: 0.6rem !important; }
+h3 { font-size: 1.2rem !important; font-weight: 700 !important; }
+h4 { font-size: 1.05rem !important; font-weight: 700 !important; margin-top: 0.4rem !important; margin-bottom: 0.6rem !important; }
 
 [data-testid="stTab"] p { font-size: 15.5px !important; font-weight: 600 !important; }
 [data-testid="stContainer"] { padding: 4px 2px; }
@@ -994,7 +995,7 @@ with tabs[2]:
                         {text[:100000]}
                         """
                         
-                        # [추가] 429 API Rate Limit 방어를 위한 스마트 재시도 로직
+                        # [수정] 강제 앱 종료 방지 및 Graceful Skip 처리
                         max_api_retries = 3
                         res_json = None
                         
@@ -1005,18 +1006,19 @@ with tabs[2]:
                                 break  # 성공 시 루프 탈출
                             except Exception as api_e:
                                 err_str = str(api_e)
-                                # 429 Quota Exceeded 에러일 경우 15초 대기 후 재시도
+                                # 429 Quota Exceeded 에러일 경우 대기 후 재시도
                                 if "429" in err_str or "Quota" in err_str:
                                     if attempt < max_api_retries - 1:
                                         wait_time = 15
                                         st.write(f"⏳ API 무료 할당량 도달. {wait_time}초 대기 후 안전하게 재시도합니다... ({attempt+1}/{max_api_retries})")
                                         time.sleep(wait_time)
                                         continue
-                                # 다른 에러이거나 최대 재시도 횟수 초과 시 완전 예외 발생
-                                raise Exception(err_str)
+                                # 에러 로그만 띄우고 앱이 죽지 않도록 루프를 탈출함
+                                st.error(f"⚠️ '{file.name}' 처리 중 API 오류 발생: {err_str}")
+                                break
 
                         if not res_json:
-                            st.error(f"'{file.name}' JSON 파싱 최종 실패")
+                            st.error(f"❌ '{file.name}' JSON 파싱 최종 실패 (건너뜁니다)")
                             continue
 
                         try:
