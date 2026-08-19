@@ -2053,4 +2053,24 @@ if is_admin:
         if st.session_state.get('dup_preview'):
             previews = st.session_state['dup_preview']
             drop_nos = st.session_state['dup_drop_nos']
-            if 
+            if not previews:
+                st.info("중복으로 판단되는 논문이 없습니다.")
+            else:
+                st.warning(f"총 {len(previews)}개 그룹, {len(drop_nos)}건이 삭제 대상입니다. 삭제 전 아래 내용을 꼭 확인해주세요.")
+                for p in previews:
+                    with st.container(border=True):
+                        st.markdown(f"**📄 {p['title']}**")
+                        st.write(f"✅ 유지: No.{p['keep_no']} (완성도 {p['keep_completeness']}개 필드)")
+                        for dno, dcomp in zip(p['drop_nos'], p['drop_completeness']):
+                            st.write(f"🗑️ 삭제 예정: No.{dno} (완성도 {dcomp}개 필드)")
+
+                if st.button("⚠️ 위 목록대로 중복 삭제 실행 (되돌릴 수 없음)", type="primary"):
+                    load_master_excel.clear()
+                    fresh_df, fresh_sha = load_master_excel()
+                    cleaned = fresh_df[~fresh_df['No.'].isin(drop_nos)].reset_index(drop=True)
+                    cleaned['No.'] = range(1, len(cleaned) + 1)
+                    save_master_excel(cleaned, fresh_sha)
+                    load_master_excel.clear()
+                    st.success(f"중복 {len(drop_nos)}건을 삭제하고 No.를 다시 정렬했습니다. 페이지를 새로고침하세요.")
+                    del st.session_state['dup_preview']
+                    del st.session_state['dup_drop_nos']
