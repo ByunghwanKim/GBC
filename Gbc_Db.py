@@ -824,7 +824,7 @@ if not st.session_state.get('_app_warmed_up', False):
     st.session_state['_app_warmed_up'] = True
     st.rerun()
 
-tab_names = ["🔍 연구 논문 DB 검색", "🌐 Semantic Scholar 검색", "🚀 논문 파일 업로드", "📊 통계 분석 (준비중)"]
+tab_names = ["🔍 연구 논문 DB 검색", "🌐 Semantic Scholar 검색", "🚀 논문 파일 업로드", "📊 통계 분석 (파일럿)"]
 if is_admin:
     tab_names.append("⚙️ 관리자 전용 관리 (DB/다운로드)")
 
@@ -1677,9 +1677,9 @@ with tabs[3]:
                     st.markdown("#### ⚙️ 변수 설정")
                     c1, c2 = st.columns(2)
                     with c1:
-                        dv_col = st.selectbox("종속변수 (연속형)", numeric_cols, key="ttest_dv")
+                        group_col = st.selectbox("집단변수 (그룹 2개)", all_cols, key="ttest_group")
                     with c2:
-                        group_col = st.selectbox("집단변수 (그룹 2개)", [c for c in all_cols if c != dv_col], key="ttest_group")
+                        dv_col = st.selectbox("종속변수 (연속형)", [c for c in numeric_cols if c != group_col], key="ttest_dv")
 
                     if st.button("▶️ t-검정 실행", type="primary", key="btn_run_ttest"):
                         groups = stat_df[group_col].dropna().unique()
@@ -1740,9 +1740,9 @@ with tabs[3]:
                     st.markdown("#### ⚙️ 변수 설정")
                     c1, c2 = st.columns(2)
                     with c1:
-                        dv_col = st.selectbox("종속변수 (연속형)", numeric_cols, key="anova1_dv")
+                        factor_col = st.selectbox("요인(집단)변수 (3개 이상 그룹 권장)", all_cols, key="anova1_factor")
                     with c2:
-                        factor_col = st.selectbox("요인(집단)변수 (3개 이상 그룹 권장)", [c for c in all_cols if c != dv_col], key="anova1_factor")
+                        dv_col = st.selectbox("종속변수 (연속형)", [c for c in numeric_cols if c != factor_col], key="anova1_dv")
 
                     if st.button("▶️ 일원분산분석 실행", type="primary", key="btn_run_anova1"):
                         work = stat_df[[dv_col, factor_col]].dropna()
@@ -1791,15 +1791,15 @@ with tabs[3]:
                     st.markdown("#### ⚙️ 변수 설정")
                     c1, c2 = st.columns(2)
                     with c1:
-                        dv_col = st.selectbox("종속변수 (연속형)", numeric_cols, key="anova2_dv")
-                    with c2:
                         # [수정] "요인 1 / 요인 2" 슬롯 2개로 고정돼 있던 것을,
                         # 요인이 2개보다 많은 설계(3요인 이상)도 가능하도록 multiselect로 확장.
                         factor_cols = st.multiselect(
                             "요인(집단)변수 - 2개 이상 선택 (3요인 이상 요인설계도 가능)",
-                            [c for c in all_cols if c != dv_col],
+                            all_cols,
                             key="anova2_factors"
                         )
+                    with c2:
+                        dv_col = st.selectbox("종속변수 (연속형)", [c for c in numeric_cols if c not in factor_cols], key="anova2_dv")
 
                     if st.button("▶️ 분산분석 실행", type="primary", key="btn_run_anova2"):
                         if len(factor_cols) < 2:
@@ -1849,16 +1849,16 @@ with tabs[3]:
                     st.markdown("#### ⚙️ 변수 설정")
                     c1, c2 = st.columns(2)
                     with c1:
-                        dv_col = st.selectbox("종속변수 (연속형)", numeric_cols, key="reg_dv")
-                    with c2:
                         # [수정] 이전에는 numeric_cols(숫자형)만 독립변수로 고를 수 있어서
                         # 범주형(문자열) 변수는 선택지에 아예 안 나타났음.
                         # 이제 전체 컬럼을 고를 수 있게 하고, 범주형이면 자동으로 더미변수로 변환한다.
                         iv_cols = st.multiselect(
                             "독립변수 (1개 이상 선택, 범주형도 선택 가능 - 자동으로 더미변수 처리됨)",
-                            [c for c in all_cols if c != dv_col],
+                            all_cols,
                             key="reg_iv"
                         )
+                    with c2:
+                        dv_col = st.selectbox("종속변수 (연속형)", [c for c in numeric_cols if c not in iv_cols], key="reg_dv")
 
                     if iv_cols:
                         iv_type_preview = {c: guess_scale_type(stat_df[c]) for c in iv_cols}
