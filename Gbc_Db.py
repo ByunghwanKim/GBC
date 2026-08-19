@@ -147,6 +147,7 @@ try:
     ADMIN_PASSWORD = st.secrets.get("ADMIN_PASSWORD", "")
     S2_API_KEY = st.secrets.get("S2_API_KEY", "")
     APP_PASSWORD = st.secrets.get("APP_PASSWORD", "gbc1234!")
+    STATS_PASSWORD = st.secrets.get("STATS_PASSWORD", "stats1234!")
 except Exception:
     st.error("⚠️ Streamlit Secrets 설정을 확인해주세요.")
     st.stop()
@@ -1358,599 +1359,617 @@ with tabs[2]:
 # [탭 4] 통계 분석 (파일럿 테스트)
 with tabs[3]:
     st.subheader("📊 통계 분석 (파일럿 테스트)")
-    st.warning(
-        "⚠️ 이 도구는 **파일럿 테스트/사전 점검용**입니다. 정식 논문에 쓰실 분석은 "
-        "반드시 SPSS 등 검증된 통계 소프트웨어로 다시 진행하시길 권장합니다."
-    )
 
-    stat_file = st.file_uploader(
-        "분석할 데이터 파일 (CSV 또는 엑셀, 1행 = 응답자 1명)",
-        type=['csv', 'xlsx', 'xls'],
-        key="stat_data_uploader"
-    )
+    # [추가] 이 탭 전용 비밀번호 게이트. 다른 탭(논문 DB 검색 등)은 그대로 열려있고,
+    # 통계 분석 탭만 별도 비밀번호가 있어야 내용이 보이도록 함.
+    if "stats_authenticated" not in st.session_state:
+        st.session_state["stats_authenticated"] = False
 
-    # [추가] 파일을 고르는 즉시 자동으로 읽어들이지 않고, 버튼을 눌러야
-    # 실제 분석 화면이 시작되도록 함.
-    if stat_file is not None:
-        if st.button("▶️ 분석 시작 (파일 불러오기)", type="primary", key="btn_start_stat_analysis"):
-            st.session_state['stat_analysis_started'] = True
-    else:
-        st.session_state['stat_analysis_started'] = False
-
-    if stat_file is not None and st.session_state.get('stat_analysis_started'):
-        # [수정] 파일을 매 rerun마다 다시 읽지 않고 세션에 보관 -> 신뢰도분석/요인분석에서
-        # "평균 내서 새 변수로 추가"한 컬럼이 이후 분석(t-검정/ANOVA/회귀분석)에서도 계속 남아있게 함.
-        if (st.session_state.get('stat_df_source_name') != stat_file.name
-                or 'stat_df_working' not in st.session_state):
-            try:
-                if stat_file.name.lower().endswith('.csv'):
-                    loaded_df = pd.read_csv(stat_file)
+    if not st.session_state["stats_authenticated"]:
+        st.info("🔒 이 탭은 별도 비밀번호가 필요합니다.")
+        with st.form("stats_login_form"):
+            stats_pw_input = st.text_input("통계 분석 탭 비밀번호", type="password", key="stats_pw_input")
+            stats_submitted = st.form_submit_button("입장")
+            if stats_submitted:
+                if stats_pw_input == STATS_PASSWORD:
+                    st.session_state["stats_authenticated"] = True
+                    st.rerun()
                 else:
-                    loaded_df = pd.read_excel(stat_file)
-                st.session_state['stat_df_working'] = loaded_df
-                st.session_state['stat_df_source_name'] = stat_file.name
-            except Exception as e:
-                st.error(f"파일을 읽는 중 오류가 발생했습니다: {e}")
-                st.session_state['stat_df_working'] = None
+                    st.error("❌ 비밀번호가 일치하지 않습니다.")
+    else:
+        st.warning(
+            "⚠️ 이 도구는 **파일럿 테스트/사전 점검용**입니다. 정식 논문에 쓰실 분석은 "
+            "반드시 SPSS 등 검증된 통계 소프트웨어로 다시 진행하시길 권장합니다."
+        )
 
-        stat_df = st.session_state.get('stat_df_working')
+        stat_file = st.file_uploader(
+            "분석할 데이터 파일 (CSV 또는 엑셀, 1행 = 응답자 1명)",
+            type=['csv', 'xlsx', 'xls'],
+            key="stat_data_uploader"
+        )
 
-        if stat_df is not None and not stat_df.empty:
-            st.success(f"✅ {len(stat_df)}행 × {len(stat_df.columns)}열 데이터를 불러왔습니다.")
-            with st.expander("📋 데이터 미리보기"):
-                st.dataframe(stat_df.head(20), use_container_width=True)
+        # [추가] 파일을 고르는 즉시 자동으로 읽어들이지 않고, 버튼을 눌러야
+        # 실제 분석 화면이 시작되도록 함.
+        if stat_file is not None:
+            if st.button("▶️ 분석 시작 (파일 불러오기)", type="primary", key="btn_start_stat_analysis"):
+                st.session_state['stat_analysis_started'] = True
+        else:
+            st.session_state['stat_analysis_started'] = False
 
-            numeric_cols = stat_df.select_dtypes(include=[np.number]).columns.tolist()
-            all_cols = stat_df.columns.tolist()
+        if stat_file is not None and st.session_state.get('stat_analysis_started'):
+            # [수정] 파일을 매 rerun마다 다시 읽지 않고 세션에 보관 -> 신뢰도분석/요인분석에서
+            # "평균 내서 새 변수로 추가"한 컬럼이 이후 분석(t-검정/ANOVA/회귀분석)에서도 계속 남아있게 함.
+            if (st.session_state.get('stat_df_source_name') != stat_file.name
+                    or 'stat_df_working' not in st.session_state):
+                try:
+                    if stat_file.name.lower().endswith('.csv'):
+                        loaded_df = pd.read_csv(stat_file)
+                    else:
+                        loaded_df = pd.read_excel(stat_file)
+                    st.session_state['stat_df_working'] = loaded_df
+                    st.session_state['stat_df_source_name'] = stat_file.name
+                except Exception as e:
+                    st.error(f"파일을 읽는 중 오류가 발생했습니다: {e}")
+                    st.session_state['stat_df_working'] = None
 
-            # -----------------------------------------------------
-            # [추가] 척도 유형 기반 분석 추천 가이드
-            # -----------------------------------------------------
-            with st.expander("🧭 어떤 분석을 써야 할지 모르겠다면 - 변수 골라서 추천받기", expanded=False):
-                st.caption("종속변수와 독립변수를 골라주시면, 두 변수의 척도 유형(연속형/범주형)을 "
-                           "자동으로 판단해서 적합한 분석을 추천해드립니다. "
-                           "(5~9점 사이 정수 응답은 리커트 척도로 보고 연속형으로 처리합니다.)")
-                gc1, gc2 = st.columns(2)
-                with gc1:
-                    guide_dv = st.selectbox("종속변수(DV)", all_cols, key="guide_dv")
-                with gc2:
-                    guide_iv = st.multiselect("독립변수(IV) - 1~2개 선택", all_cols, key="guide_iv")
+            stat_df = st.session_state.get('stat_df_working')
 
-                if guide_dv and guide_iv:
-                    auto_dv_type = guess_scale_type(stat_df[guide_dv])
-                    st.markdown(f"##### 척도 유형 확인 (자동판단 기본값 · 필요시 수정 가능)")
+            if stat_df is not None and not stat_df.empty:
+                st.success(f"✅ {len(stat_df)}행 × {len(stat_df.columns)}열 데이터를 불러왔습니다.")
+                with st.expander("📋 데이터 미리보기"):
+                    st.dataframe(stat_df.head(20), use_container_width=True)
 
-                    dc1, dc2 = st.columns([2, 3])
-                    with dc1:
-                        st.write(f"**{guide_dv}** (DV)")
-                        st.caption(f"자동판단: {auto_dv_type}")
-                    with dc2:
-                        dv_type = st.radio(
-                            f"{guide_dv} 척도 유형", ["연속형", "범주형"],
-                            index=0 if auto_dv_type == "연속형" else 1,
-                            horizontal=True, key="guide_dv_type_override", label_visibility="collapsed"
-                        )
+                numeric_cols = stat_df.select_dtypes(include=[np.number]).columns.tolist()
+                all_cols = stat_df.columns.tolist()
 
-                    iv_types = {}
-                    n_groups = {c: stat_df[c].nunique(dropna=True) for c in guide_iv}
-                    for c in guide_iv:
-                        auto_type = guess_scale_type(stat_df[c])
-                        ic1, ic2 = st.columns([2, 3])
-                        with ic1:
-                            st.write(f"**{c}** (IV)")
-                            extra = f", 그룹 수 {n_groups[c]}개" if auto_type == "범주형" else ""
-                            st.caption(f"자동판단: {auto_type}{extra}")
-                        with ic2:
-                            iv_types[c] = st.radio(
-                                f"{c} 척도 유형", ["연속형", "범주형"],
-                                index=0 if auto_type == "연속형" else 1,
-                                horizontal=True, key=f"guide_iv_type_override_{c}", label_visibility="collapsed"
+                # -----------------------------------------------------
+                # [추가] 척도 유형 기반 분석 추천 가이드
+                # -----------------------------------------------------
+                with st.expander("🧭 어떤 분석을 써야 할지 모르겠다면 - 변수 골라서 추천받기", expanded=False):
+                    st.caption("종속변수와 독립변수를 골라주시면, 두 변수의 척도 유형(연속형/범주형)을 "
+                               "자동으로 판단해서 적합한 분석을 추천해드립니다. "
+                               "(5~9점 사이 정수 응답은 리커트 척도로 보고 연속형으로 처리합니다.)")
+                    gc1, gc2 = st.columns(2)
+                    with gc1:
+                        guide_dv = st.selectbox("종속변수(DV)", all_cols, key="guide_dv")
+                    with gc2:
+                        guide_iv = st.multiselect("독립변수(IV) - 1~2개 선택", all_cols, key="guide_iv")
+
+                    if guide_dv and guide_iv:
+                        auto_dv_type = guess_scale_type(stat_df[guide_dv])
+                        st.markdown(f"##### 척도 유형 확인 (자동판단 기본값 · 필요시 수정 가능)")
+
+                        dc1, dc2 = st.columns([2, 3])
+                        with dc1:
+                            st.write(f"**{guide_dv}** (DV)")
+                            st.caption(f"자동판단: {auto_dv_type}")
+                        with dc2:
+                            dv_type = st.radio(
+                                f"{guide_dv} 척도 유형", ["연속형", "범주형"],
+                                index=0 if auto_dv_type == "연속형" else 1,
+                                horizontal=True, key="guide_dv_type_override", label_visibility="collapsed"
                             )
 
-                    st.divider()
+                        iv_types = {}
+                        n_groups = {c: stat_df[c].nunique(dropna=True) for c in guide_iv}
+                        for c in guide_iv:
+                            auto_type = guess_scale_type(stat_df[c])
+                            ic1, ic2 = st.columns([2, 3])
+                            with ic1:
+                                st.write(f"**{c}** (IV)")
+                                extra = f", 그룹 수 {n_groups[c]}개" if auto_type == "범주형" else ""
+                                st.caption(f"자동판단: {auto_type}{extra}")
+                            with ic2:
+                                iv_types[c] = st.radio(
+                                    f"{c} 척도 유형", ["연속형", "범주형"],
+                                    index=0 if auto_type == "연속형" else 1,
+                                    horizontal=True, key=f"guide_iv_type_override_{c}", label_visibility="collapsed"
+                                )
 
-                    if dv_type != "연속형":
-                        st.warning("종속변수가 범주형으로 감지되었습니다. 이 통계 탭은 현재 "
-                                   "연속형 종속변수를 전제로 한 t-검정/ANOVA/회귀분석만 지원합니다. "
-                                   "(카이제곱검정·로지스틱회귀는 아직 준비되지 않았습니다.)")
-                    elif len(guide_iv) == 1 and iv_types[guide_iv[0]] == "범주형":
-                        g = n_groups[guide_iv[0]]
-                        if g == 2:
-                            st.success("💡 추천: **독립표본 t-검정** (연속형 DV + 2개 그룹 범주형 IV)")
-                        elif g >= 3:
-                            st.success("💡 추천: **일원분산분석(One-way ANOVA)** (연속형 DV + 3개 이상 그룹 범주형 IV)")
+                        st.divider()
+
+                        if dv_type != "연속형":
+                            st.warning("종속변수가 범주형으로 감지되었습니다. 이 통계 탭은 현재 "
+                                       "연속형 종속변수를 전제로 한 t-검정/ANOVA/회귀분석만 지원합니다. "
+                                       "(카이제곱검정·로지스틱회귀는 아직 준비되지 않았습니다.)")
+                        elif len(guide_iv) == 1 and iv_types[guide_iv[0]] == "범주형":
+                            g = n_groups[guide_iv[0]]
+                            if g == 2:
+                                st.success("💡 추천: **독립표본 t-검정** (연속형 DV + 2개 그룹 범주형 IV)")
+                            elif g >= 3:
+                                st.success("💡 추천: **일원분산분석(One-way ANOVA)** (연속형 DV + 3개 이상 그룹 범주형 IV)")
+                            else:
+                                st.error("선택한 독립변수의 그룹이 1개뿐입니다. 그룹이 2개 이상인 변수를 선택해주세요.")
+                        elif len(guide_iv) == 2 and all(iv_types[c] == "범주형" for c in guide_iv):
+                            st.success("💡 추천: **이원분산분석(Two-way ANOVA)** (연속형 DV + 범주형 IV 2개, 상호작용효과까지 확인 가능)")
+                        elif all(iv_types[c] == "연속형" for c in guide_iv):
+                            st.success("💡 추천: **회귀분석** (연속형 DV + 연속형 IV)")
+                            st.caption("↳ 다문항 설문 척도를 그대로 넣기 전에, 아래 '신뢰도분석/요인분석'으로 "
+                                       "먼저 문항을 하나의 변수로 축소하시는 걸 권장합니다.")
                         else:
-                            st.error("선택한 독립변수의 그룹이 1개뿐입니다. 그룹이 2개 이상인 변수를 선택해주세요.")
-                    elif len(guide_iv) == 2 and all(iv_types[c] == "범주형" for c in guide_iv):
-                        st.success("💡 추천: **이원분산분석(Two-way ANOVA)** (연속형 DV + 범주형 IV 2개, 상호작용효과까지 확인 가능)")
-                    elif all(iv_types[c] == "연속형" for c in guide_iv):
-                        st.success("💡 추천: **회귀분석** (연속형 DV + 연속형 IV)")
-                        st.caption("↳ 다문항 설문 척도를 그대로 넣기 전에, 아래 '신뢰도분석/요인분석'으로 "
-                                   "먼저 문항을 하나의 변수로 축소하시는 걸 권장합니다.")
-                    else:
-                        st.info("연속형과 범주형 독립변수가 섞여 있습니다. 이 경우 공분산분석(ANCOVA)이 "
-                                "적합하지만 아직 이 탭에서 지원하지 않습니다. 범주형 변수만으로 ANOVA를, "
-                                "또는 연속형 변수만으로 회귀분석을 별도로 진행해보세요.")
+                            st.info("연속형과 범주형 독립변수가 섞여 있습니다. 이 경우 공분산분석(ANCOVA)이 "
+                                    "적합하지만 아직 이 탭에서 지원하지 않습니다. 범주형 변수만으로 ANOVA를, "
+                                    "또는 연속형 변수만으로 회귀분석을 별도로 진행해보세요.")
 
-            analysis_type = st.selectbox(
-                "🔬 분석 유형 선택",
-                ["신뢰도분석 (Cronbach's α)", "탐색적 요인분석 (EFA)",
-                 "독립표본 t-검정", "일원분산분석 (One-way ANOVA)",
-                 "다요인분산분석 (Two-way ANOVA 이상 / 요인설계)", "회귀분석 (다중회귀)"]
-            )
+                analysis_type = st.selectbox(
+                    "🔬 분석 유형 선택",
+                    ["신뢰도분석 (Cronbach's α)", "탐색적 요인분석 (EFA)",
+                     "독립표본 t-검정", "일원분산분석 (One-way ANOVA)",
+                     "다요인분산분석 (Two-way ANOVA 이상 / 요인설계)", "회귀분석 (다중회귀)"]
+                )
 
-            st.divider()
+                st.divider()
 
-            # ---------------------------------------------------------
-            # 0-A) 신뢰도분석 (Cronbach's α)
-            # ---------------------------------------------------------
-            if analysis_type == "신뢰도분석 (Cronbach's α)":
-                st.caption("💡 회귀분석·ANOVA 등에 변수를 넣기 전, 같은 구성개념(construct)을 측정하는 "
-                           "여러 문항이 일관되게 응답되었는지 먼저 확인하는 단계입니다.")
-                item_cols = st.multiselect("같은 구성개념을 측정하는 문항들 선택 (3개 이상 권장)", numeric_cols, key="alpha_items")
+                # ---------------------------------------------------------
+                # 0-A) 신뢰도분석 (Cronbach's α)
+                # ---------------------------------------------------------
+                if analysis_type == "신뢰도분석 (Cronbach's α)":
+                    st.caption("💡 회귀분석·ANOVA 등에 변수를 넣기 전, 같은 구성개념(construct)을 측정하는 "
+                               "여러 문항이 일관되게 응답되었는지 먼저 확인하는 단계입니다.")
+                    item_cols = st.multiselect("같은 구성개념을 측정하는 문항들 선택 (3개 이상 권장)", numeric_cols, key="alpha_items")
 
-                if st.button("▶️ 신뢰도분석 실행", type="primary", key="btn_run_alpha"):
-                    if len(item_cols) < 2:
-                        st.error("문항을 2개 이상 선택해주세요.")
-                    else:
-                        work = stat_df[item_cols].dropna()
-                        alpha = cronbach_alpha(work)
-                        item_table = item_total_analysis(work)
-                        # [수정] 결과를 세션에 저장 -> 아래 "변수 추가" 버튼을 눌러도
-                        # (그 버튼도 st.button이라 리런을 유발하는데) 이 결과가 사라지지 않게 함.
-                        st.session_state['alpha_result'] = {
-                            'item_cols': item_cols, 'alpha': alpha, 'item_table': item_table, 'n': len(work)
-                        }
-
-                if st.session_state.get('alpha_result'):
-                    r = st.session_state['alpha_result']
-                    st.markdown("##### 📋 전체 신뢰도")
-                    st.dataframe(pd.DataFrame({'문항 수': [len(r['item_cols'])], 'N': [r['n']], "Cronbach's α": [r['alpha']]})
-                                 .style.format({"Cronbach's α": '{:.3f}'}), use_container_width=True)
-
-                    st.markdown("##### 📋 문항-총점 분석")
-                    st.dataframe(r['item_table'].style.format({'문항-총점 상관': '{:.3f}', '삭제 시 α': '{:.3f}'}),
-                                 use_container_width=True)
-
-                    level = "우수" if r['alpha'] >= 0.9 else ("양호" if r['alpha'] >= 0.8 else ("수용 가능" if r['alpha'] >= 0.7 else "낮음 - 재검토 필요"))
-                    low_items = r['item_table'][r['item_table']['문항-총점 상관'] < 0.3]['문항'].tolist()
-                    msg = f"**해석**: 전체 신뢰도 α = {r['alpha']:.3f}로 **{level}** 수준입니다 (통상 α ≥ .70을 기준으로 봅니다)."
-                    if low_items:
-                        msg += f" 문항-총점 상관이 낮은(.30 미만) 문항: {', '.join(low_items)} — 삭제를 고려해볼 수 있습니다."
-                    st.info(msg)
-
-                    st.divider()
-                    st.markdown("##### ➕ 이 문항들을 하나의 변수로 만들기")
-                    st.caption(
-                        "**왜 이렇게 하나요?** 지금 위에서 확인한 문항들(예: risk1, risk2, risk3)은 전부 "
-                        "'같은 개념(예: 지각된 위험)'을 서로 다른 각도에서 물어본 것들입니다. 신뢰도(α)가 "
-                        "충분히 높다면, 이 문항들을 각각 따로 분석에 넣기보다 **평균을 낸 값 하나**를 그 개념을 "
-                        "대표하는 변수로 써야 합니다. 문항을 그대로 여러 개 넣으면 서로 상관이 너무 높아 "
-                        "다중공선성 문제가 생기고, 애초에 '측정하려던 하나의 개념'이 아니라 문항 각각의 "
-                        "우연한 응답 패턴을 분석하게 되어버립니다."
-                    )
-                    default_name = "_".join([c[:4] for c in r['item_cols'][:2]]) + "_평균"
-                    new_var_name = st.text_input("새로 만들 변수 이름", value=default_name, key="alpha_newvar_name")
-                    if st.button("➕ 이 문항들 평균 내서 새 변수로 추가", key="btn_add_alpha_avg"):
-                        if not new_var_name.strip():
-                            st.error("변수 이름을 입력해주세요.")
-                        elif new_var_name in st.session_state['stat_df_working'].columns:
-                            st.error(f"'{new_var_name}' 이름의 변수가 이미 있습니다. 다른 이름을 써주세요.")
+                    if st.button("▶️ 신뢰도분석 실행", type="primary", key="btn_run_alpha"):
+                        if len(item_cols) < 2:
+                            st.error("문항을 2개 이상 선택해주세요.")
                         else:
-                            st.session_state['stat_df_working'][new_var_name] = stat_df[r['item_cols']].mean(axis=1)
-                            st.success(f"✅ '{new_var_name}' 변수가 추가되었습니다! 다른 분석(t-검정/ANOVA/회귀분석)의 "
-                                       f"변수 선택 목록에서 바로 사용하실 수 있습니다.")
-                            st.rerun()
+                            work = stat_df[item_cols].dropna()
+                            alpha = cronbach_alpha(work)
+                            item_table = item_total_analysis(work)
+                            # [수정] 결과를 세션에 저장 -> 아래 "변수 추가" 버튼을 눌러도
+                            # (그 버튼도 st.button이라 리런을 유발하는데) 이 결과가 사라지지 않게 함.
+                            st.session_state['alpha_result'] = {
+                                'item_cols': item_cols, 'alpha': alpha, 'item_table': item_table, 'n': len(work)
+                            }
 
-            # ---------------------------------------------------------
-            # 0-B) 탐색적 요인분석 (EFA)
-            # ---------------------------------------------------------
-            elif analysis_type == "탐색적 요인분석 (EFA)":
-                st.caption("💡 여러 문항이 실제로 몇 개의 하위요인(개념)으로 나뉘는지 확인하는 단계입니다. "
-                           "이미 검증된 척도를 그대로 쓰신다면 생략하셔도 됩니다.")
-                efa_items = st.multiselect("요인분석할 문항들 선택 (최소 4개 이상 권장)", numeric_cols, key="efa_items")
-                auto_n = st.checkbox("요인 수 자동 결정 (고유값 > 1 기준, Kaiser 기준)", value=True, key="efa_auto_n")
-                manual_n = None
-                if not auto_n:
-                    # [수정] 상한을 10으로 고정해뒀던 것을, 선택한 문항 수만큼(최대) 지정 가능하도록 확장.
-                    # 요인 수는 어차피 문항 수를 넘을 수 없으므로 이게 자연스러운 상한임.
-                    max_possible = max(1, len(efa_items)) if efa_items else 10
-                    manual_n = st.number_input("추출할 요인 수 직접 지정", min_value=1, max_value=max_possible,
-                                                value=min(2, max_possible), key="efa_manual_n")
+                    if st.session_state.get('alpha_result'):
+                        r = st.session_state['alpha_result']
+                        st.markdown("##### 📋 전체 신뢰도")
+                        st.dataframe(pd.DataFrame({'문항 수': [len(r['item_cols'])], 'N': [r['n']], "Cronbach's α": [r['alpha']]})
+                                     .style.format({"Cronbach's α": '{:.3f}'}), use_container_width=True)
 
-                if st.button("▶️ 요인분석 실행", type="primary", key="btn_run_efa"):
-                    if len(efa_items) < 3:
-                        st.error("문항을 3개 이상 선택해주세요.")
-                    else:
-                        work = stat_df[efa_items].dropna()
-                        result = simple_efa(work, n_factors=None if auto_n else int(manual_n))
-                        st.session_state['efa_result'] = {'items': efa_items, 'result': result}
+                        st.markdown("##### 📋 문항-총점 분석")
+                        st.dataframe(r['item_table'].style.format({'문항-총점 상관': '{:.3f}', '삭제 시 α': '{:.3f}'}),
+                                     use_container_width=True)
 
-                if st.session_state.get('efa_result'):
-                    result = st.session_state['efa_result']['result']
-                    efa_items_used = st.session_state['efa_result']['items']
+                        level = "우수" if r['alpha'] >= 0.9 else ("양호" if r['alpha'] >= 0.8 else ("수용 가능" if r['alpha'] >= 0.7 else "낮음 - 재검토 필요"))
+                        low_items = r['item_table'][r['item_table']['문항-총점 상관'] < 0.3]['문항'].tolist()
+                        msg = f"**해석**: 전체 신뢰도 α = {r['alpha']:.3f}로 **{level}** 수준입니다 (통상 α ≥ .70을 기준으로 봅니다)."
+                        if low_items:
+                            msg += f" 문항-총점 상관이 낮은(.30 미만) 문항: {', '.join(low_items)} — 삭제를 고려해볼 수 있습니다."
+                        st.info(msg)
 
-                    st.markdown("##### 📋 표본적합도")
-                    kmo_level = "매우 좋음" if result['kmo'] >= 0.9 else ("좋음" if result['kmo'] >= 0.8 else
-                                ("보통" if result['kmo'] >= 0.7 else ("평범" if result['kmo'] >= 0.6 else "부적합")))
-                    st.dataframe(pd.DataFrame({
-                        'KMO': [result['kmo']], 'KMO 판정': [kmo_level],
-                        'Bartlett χ²': [result['bartlett_chi2']], 'df': [result['bartlett_df']],
-                        'p': [result['bartlett_p']]
-                    }).style.format({'KMO': '{:.3f}', 'Bartlett χ²': '{:.2f}', 'df': '{:.0f}', 'p': '{:.5f}'}),
-                        use_container_width=True)
+                        st.divider()
+                        st.markdown("##### ➕ 이 문항들을 하나의 변수로 만들기")
+                        st.caption(
+                            "**왜 이렇게 하나요?** 지금 위에서 확인한 문항들(예: risk1, risk2, risk3)은 전부 "
+                            "'같은 개념(예: 지각된 위험)'을 서로 다른 각도에서 물어본 것들입니다. 신뢰도(α)가 "
+                            "충분히 높다면, 이 문항들을 각각 따로 분석에 넣기보다 **평균을 낸 값 하나**를 그 개념을 "
+                            "대표하는 변수로 써야 합니다. 문항을 그대로 여러 개 넣으면 서로 상관이 너무 높아 "
+                            "다중공선성 문제가 생기고, 애초에 '측정하려던 하나의 개념'이 아니라 문항 각각의 "
+                            "우연한 응답 패턴을 분석하게 되어버립니다."
+                        )
+                        default_name = "_".join([c[:4] for c in r['item_cols'][:2]]) + "_평균"
+                        new_var_name = st.text_input("새로 만들 변수 이름", value=default_name, key="alpha_newvar_name")
+                        if st.button("➕ 이 문항들 평균 내서 새 변수로 추가", key="btn_add_alpha_avg"):
+                            if not new_var_name.strip():
+                                st.error("변수 이름을 입력해주세요.")
+                            elif new_var_name in st.session_state['stat_df_working'].columns:
+                                st.error(f"'{new_var_name}' 이름의 변수가 이미 있습니다. 다른 이름을 써주세요.")
+                            else:
+                                st.session_state['stat_df_working'][new_var_name] = stat_df[r['item_cols']].mean(axis=1)
+                                st.success(f"✅ '{new_var_name}' 변수가 추가되었습니다! 다른 분석(t-검정/ANOVA/회귀분석)의 "
+                                           f"변수 선택 목록에서 바로 사용하실 수 있습니다.")
+                                st.rerun()
 
-                    st.markdown("##### 📋 고유값(Eigenvalues) - Kaiser 기준(>1) 요인 수 판단")
-                    eig_table = pd.DataFrame({
-                        '요인': [f'{i+1}' for i in range(len(result['eigenvalues']))],
-                        '고유값': result['eigenvalues'],
-                    })
-                    st.dataframe(eig_table.style.format({'고유값': '{:.3f}'}), use_container_width=True)
-                    st.caption(f"↳ 추출된 요인 수: {result['n_factors']}개")
+                # ---------------------------------------------------------
+                # 0-B) 탐색적 요인분석 (EFA)
+                # ---------------------------------------------------------
+                elif analysis_type == "탐색적 요인분석 (EFA)":
+                    st.caption("💡 여러 문항이 실제로 몇 개의 하위요인(개념)으로 나뉘는지 확인하는 단계입니다. "
+                               "이미 검증된 척도를 그대로 쓰신다면 생략하셔도 됩니다.")
+                    efa_items = st.multiselect("요인분석할 문항들 선택 (최소 4개 이상 권장)", numeric_cols, key="efa_items")
+                    auto_n = st.checkbox("요인 수 자동 결정 (고유값 > 1 기준, Kaiser 기준)", value=True, key="efa_auto_n")
+                    manual_n = None
+                    if not auto_n:
+                        # [수정] 상한을 10으로 고정해뒀던 것을, 선택한 문항 수만큼(최대) 지정 가능하도록 확장.
+                        # 요인 수는 어차피 문항 수를 넘을 수 없으므로 이게 자연스러운 상한임.
+                        max_possible = max(1, len(efa_items)) if efa_items else 10
+                        manual_n = st.number_input("추출할 요인 수 직접 지정", min_value=1, max_value=max_possible,
+                                                    value=min(2, max_possible), key="efa_manual_n")
 
-                    st.markdown("##### 📋 요인적재량 (베리맥스 회전 후)")
-                    st.dataframe(result['loadings'].style.format('{:.3f}').background_gradient(
-                        cmap='Blues', vmin=0, vmax=1, axis=None
-                    ), use_container_width=True)
+                    if st.button("▶️ 요인분석 실행", type="primary", key="btn_run_efa"):
+                        if len(efa_items) < 3:
+                            st.error("문항을 3개 이상 선택해주세요.")
+                        else:
+                            work = stat_df[efa_items].dropna()
+                            result = simple_efa(work, n_factors=None if auto_n else int(manual_n))
+                            st.session_state['efa_result'] = {'items': efa_items, 'result': result}
 
-                    st.markdown("##### 📋 공통성 (Communalities)")
-                    st.dataframe(result['communalities'].to_frame('공통성').style.format({'공통성': '{:.3f}'}),
-                                 use_container_width=True)
+                    if st.session_state.get('efa_result'):
+                        result = st.session_state['efa_result']['result']
+                        efa_items_used = st.session_state['efa_result']['items']
 
-                    kmo_txt = "요인분석에 적합한 데이터입니다" if result['kmo'] >= 0.6 else "요인분석에 적합하지 않을 수 있습니다 (KMO < .6)"
-                    bartlett_txt = "유의하여 요인분석이 타당합니다" if result['bartlett_p'] < 0.05 else "유의하지 않아 요인분석이 부적절할 수 있습니다"
-                    st.info(
-                        f"**해석**: KMO = {result['kmo']:.3f}로 {kmo_txt}. "
-                        f"Bartlett 구형성 검정은 p = {result['bartlett_p']:.4f}로 **{bartlett_txt}**. "
-                        f"Kaiser 기준(고유값 > 1)으로 {result['n_factors']}개 요인이 추출되었습니다. "
-                        f"각 문항은 적재량이 가장 높은 요인에 속한다고 해석하며, 보통 .40 이상을 유의미한 적재량으로 봅니다."
-                    )
+                        st.markdown("##### 📋 표본적합도")
+                        kmo_level = "매우 좋음" if result['kmo'] >= 0.9 else ("좋음" if result['kmo'] >= 0.8 else
+                                    ("보통" if result['kmo'] >= 0.7 else ("평범" if result['kmo'] >= 0.6 else "부적합")))
+                        st.dataframe(pd.DataFrame({
+                            'KMO': [result['kmo']], 'KMO 판정': [kmo_level],
+                            'Bartlett χ²': [result['bartlett_chi2']], 'df': [result['bartlett_df']],
+                            'p': [result['bartlett_p']]
+                        }).style.format({'KMO': '{:.3f}', 'Bartlett χ²': '{:.2f}', 'df': '{:.0f}', 'p': '{:.5f}'}),
+                            use_container_width=True)
 
-                    st.divider()
-                    st.markdown("##### ➕ 요인별로 문항 평균 내서 새 변수 만들기")
-                    st.caption(
-                        "**왜 이렇게 하나요?** 요인적재량표를 보면 문항들이 몇 개의 그룹(요인)으로 나뉘어 "
-                        "높은 값을 보이는 걸 알 수 있습니다. 이 요인 구조가 이론과 맞다면, 같은 요인에 속한 "
-                        "문항들을 평균 내서 그 요인을 대표하는 변수 하나로 만드는 게 다음 단계입니다. "
-                        "예를 들어 '지각된위험1~3'이 요인1에, '신뢰1~3'이 요인2에 높게 묶였다면, "
-                        "각각 평균을 내서 '지각된위험_평균', '신뢰_평균' 두 변수를 만들어 회귀분석 등에 사용합니다."
-                    )
+                        st.markdown("##### 📋 고유값(Eigenvalues) - Kaiser 기준(>1) 요인 수 판단")
+                        eig_table = pd.DataFrame({
+                            '요인': [f'{i+1}' for i in range(len(result['eigenvalues']))],
+                            '고유값': result['eigenvalues'],
+                        })
+                        st.dataframe(eig_table.style.format({'고유값': '{:.3f}'}), use_container_width=True)
+                        st.caption(f"↳ 추출된 요인 수: {result['n_factors']}개")
 
-                    # 문항별로 절대값 적재량이 가장 큰 요인에 배정 (주적재 요인 자동 판정)
-                    loadings = result['loadings']
-                    primary_factor = loadings.abs().idxmax(axis=1)
-                    factor_groups = {}
-                    for item, fac in primary_factor.items():
-                        factor_groups.setdefault(fac, []).append(item)
+                        st.markdown("##### 📋 요인적재량 (베리맥스 회전 후)")
+                        st.dataframe(result['loadings'].style.format('{:.3f}').background_gradient(
+                            cmap='Blues', vmin=0, vmax=1, axis=None
+                        ), use_container_width=True)
 
-                    st.write("**자동 판정된 요인별 문항 그룹** (적재량 절대값이 가장 큰 요인 기준):")
-                    for fac, items in factor_groups.items():
-                        st.write(f"- {fac}: {', '.join(items)}")
+                        st.markdown("##### 📋 공통성 (Communalities)")
+                        st.dataframe(result['communalities'].to_frame('공통성').style.format({'공통성': '{:.3f}'}),
+                                     use_container_width=True)
 
-                    name_inputs = {}
-                    for fac, items in factor_groups.items():
-                        default_name = "_".join([c[:4] for c in items[:2]]) + "_평균"
-                        name_inputs[fac] = st.text_input(f"{fac} 변수 이름", value=default_name, key=f"efa_newvar_{fac}")
+                        kmo_txt = "요인분석에 적합한 데이터입니다" if result['kmo'] >= 0.6 else "요인분석에 적합하지 않을 수 있습니다 (KMO < .6)"
+                        bartlett_txt = "유의하여 요인분석이 타당합니다" if result['bartlett_p'] < 0.05 else "유의하지 않아 요인분석이 부적절할 수 있습니다"
+                        st.info(
+                            f"**해석**: KMO = {result['kmo']:.3f}로 {kmo_txt}. "
+                            f"Bartlett 구형성 검정은 p = {result['bartlett_p']:.4f}로 **{bartlett_txt}**. "
+                            f"Kaiser 기준(고유값 > 1)으로 {result['n_factors']}개 요인이 추출되었습니다. "
+                            f"각 문항은 적재량이 가장 높은 요인에 속한다고 해석하며, 보통 .40 이상을 유의미한 적재량으로 봅니다."
+                        )
 
-                    if st.button("➕ 요인별 평균 변수 한 번에 추가", key="btn_add_efa_avg"):
-                        errors = []
+                        st.divider()
+                        st.markdown("##### ➕ 요인별로 문항 평균 내서 새 변수 만들기")
+                        st.caption(
+                            "**왜 이렇게 하나요?** 요인적재량표를 보면 문항들이 몇 개의 그룹(요인)으로 나뉘어 "
+                            "높은 값을 보이는 걸 알 수 있습니다. 이 요인 구조가 이론과 맞다면, 같은 요인에 속한 "
+                            "문항들을 평균 내서 그 요인을 대표하는 변수 하나로 만드는 게 다음 단계입니다. "
+                            "예를 들어 '지각된위험1~3'이 요인1에, '신뢰1~3'이 요인2에 높게 묶였다면, "
+                            "각각 평균을 내서 '지각된위험_평균', '신뢰_평균' 두 변수를 만들어 회귀분석 등에 사용합니다."
+                        )
+
+                        # 문항별로 절대값 적재량이 가장 큰 요인에 배정 (주적재 요인 자동 판정)
+                        loadings = result['loadings']
+                        primary_factor = loadings.abs().idxmax(axis=1)
+                        factor_groups = {}
+                        for item, fac in primary_factor.items():
+                            factor_groups.setdefault(fac, []).append(item)
+
+                        st.write("**자동 판정된 요인별 문항 그룹** (적재량 절대값이 가장 큰 요인 기준):")
                         for fac, items in factor_groups.items():
-                            vname = name_inputs[fac].strip()
-                            if not vname:
-                                errors.append(f"{fac}: 변수 이름을 입력해주세요.")
-                            elif vname in st.session_state['stat_df_working'].columns:
-                                errors.append(f"{fac}: '{vname}' 이름이 이미 있습니다.")
-                        if errors:
-                            for e in errors:
-                                st.error(e)
-                        else:
+                            st.write(f"- {fac}: {', '.join(items)}")
+
+                        name_inputs = {}
+                        for fac, items in factor_groups.items():
+                            default_name = "_".join([c[:4] for c in items[:2]]) + "_평균"
+                            name_inputs[fac] = st.text_input(f"{fac} 변수 이름", value=default_name, key=f"efa_newvar_{fac}")
+
+                        if st.button("➕ 요인별 평균 변수 한 번에 추가", key="btn_add_efa_avg"):
+                            errors = []
                             for fac, items in factor_groups.items():
                                 vname = name_inputs[fac].strip()
-                                st.session_state['stat_df_working'][vname] = stat_df[items].mean(axis=1)
-                            st.success(f"✅ {len(factor_groups)}개 변수가 추가되었습니다: "
-                                       f"{', '.join(name_inputs[f].strip() for f in factor_groups)}")
-                            st.rerun()
-
-            # ---------------------------------------------------------
-            # 1) 독립표본 t-검정
-            # ---------------------------------------------------------
-            elif analysis_type == "독립표본 t-검정":
-                st.markdown("#### ⚙️ 변수 설정")
-                c1, c2 = st.columns(2)
-                with c1:
-                    dv_col = st.selectbox("종속변수 (연속형)", numeric_cols, key="ttest_dv")
-                with c2:
-                    group_col = st.selectbox("집단변수 (그룹 2개)", [c for c in all_cols if c != dv_col], key="ttest_group")
-
-                if st.button("▶️ t-검정 실행", type="primary", key="btn_run_ttest"):
-                    groups = stat_df[group_col].dropna().unique()
-                    if len(groups) != 2:
-                        st.error(f"집단변수는 정확히 2개 그룹이어야 합니다. 현재 {len(groups)}개 그룹입니다: {list(groups)}")
-                    else:
-                        g1_name, g2_name = groups[0], groups[1]
-                        g1 = stat_df.loc[stat_df[group_col] == g1_name, dv_col].dropna()
-                        g2 = stat_df.loc[stat_df[group_col] == g2_name, dv_col].dropna()
-
-                        desc_table = pd.DataFrame({
-                            '집단': [str(g1_name), str(g2_name)],
-                            'N': [len(g1), len(g2)],
-                            '평균': [g1.mean(), g2.mean()],
-                            '표준편차': [g1.std(), g2.std()],
-                            '표준오차': [g1.sem(), g2.sem()],
-                        })
-                        st.markdown("##### 📋 집단기술통계량")
-                        st.dataframe(desc_table.style.format(
-                            {'평균': '{:.3f}', '표준편차': '{:.3f}', '표준오차': '{:.3f}'}
-                        ), use_container_width=True)
-
-                        levene_stat, levene_p = scipy_stats.levene(g1, g2)
-                        equal_var = levene_p > 0.05
-                        st.markdown("##### 📋 등분산 검정 (Levene)")
-                        st.dataframe(pd.DataFrame({
-                            'F': [levene_stat], 'p': [levene_p],
-                            '등분산 가정': ['가정됨 (등분산 t 사용)' if equal_var else '가정 안 됨 (Welch t 사용)']
-                        }).style.format({'F': '{:.3f}', 'p': '{:.3f}'}), use_container_width=True)
-
-                        pg_result = pg.ttest(g1, g2, correction=not equal_var)
-                        col_p = _pg_col(pg_result, 'p-val', 'p_val')
-                        col_d = _pg_col(pg_result, 'cohen-d', 'cohen_d')
-                        col_power = _pg_col(pg_result, 'power')
-                        st.markdown("##### 📋 t-검정 결과")
-                        st.dataframe(pg_result.style.format({
-                            'T': '{:.3f}', 'dof': '{:.2f}', col_p: '{:.4f}',
-                            col_d: '{:.3f}', col_power: '{:.3f}'
-                        }), use_container_width=True)
-
-                        t_val = pg_result['T'].iloc[0]
-                        p_val = pg_result[col_p].iloc[0]
-                        dof = pg_result['dof'].iloc[0]
-                        d_val = pg_result[col_d].iloc[0]
-                        sig_txt = "통계적으로 유의합니다" if p_val < 0.05 else "통계적으로 유의하지 않습니다"
-                        st.info(
-                            f"**해석**: {g1_name} 집단(M={g1.mean():.2f}, SD={g1.std():.2f})과 "
-                            f"{g2_name} 집단(M={g2.mean():.2f}, SD={g2.std():.2f}) 간 평균 차이는 "
-                            f"t({dof:.1f}) = {t_val:.3f}, p = {p_val:.3f}로 **{sig_txt}** (p {'<' if p_val < 0.05 else '≥'} .05). "
-                            f"효과크기(Cohen's d = {d_val:.3f})는 "
-                            f"{'작은' if abs(d_val) < 0.5 else ('중간' if abs(d_val) < 0.8 else '큰')} 편입니다."
-                        )
-
-            # ---------------------------------------------------------
-            # 2) 일원분산분석
-            # ---------------------------------------------------------
-            elif analysis_type == "일원분산분석 (One-way ANOVA)":
-                st.markdown("#### ⚙️ 변수 설정")
-                c1, c2 = st.columns(2)
-                with c1:
-                    dv_col = st.selectbox("종속변수 (연속형)", numeric_cols, key="anova1_dv")
-                with c2:
-                    factor_col = st.selectbox("요인(집단)변수 (3개 이상 그룹 권장)", [c for c in all_cols if c != dv_col], key="anova1_factor")
-
-                if st.button("▶️ 일원분산분석 실행", type="primary", key="btn_run_anova1"):
-                    work = stat_df[[dv_col, factor_col]].dropna()
-                    groups = work[factor_col].unique()
-                    if len(groups) < 2:
-                        st.error("요인변수에 그룹이 2개 이상 있어야 합니다.")
-                    else:
-                        desc = work.groupby(factor_col)[dv_col].agg(['count', 'mean', 'std']).reset_index()
-                        desc.columns = ['집단', 'N', '평균', '표준편차']
-                        st.markdown("##### 📋 집단별 기술통계량")
-                        st.dataframe(desc.style.format({'평균': '{:.3f}', '표준편차': '{:.3f}'}), use_container_width=True)
-
-                        aov = pg.anova(data=work, dv=dv_col, between=factor_col, detailed=True)
-                        st.markdown("##### 📋 분산분석표 (ANOVA)")
-                        st.dataframe(aov.style.format({
-                            'SS': '{:.3f}', 'MS': '{:.3f}', 'F': '{:.3f}', 'p_unc': '{:.4f}', 'np2': '{:.3f}'
-                        }, na_rep='-'), use_container_width=True)
-
-                        f_val = aov['F'].iloc[0]
-                        p_val = aov['p_unc'].iloc[0]
-                        eta2 = aov['np2'].iloc[0]
-                        df1, df2 = aov['DF'].iloc[0], aov['DF'].iloc[1]
-                        sig_txt = "통계적으로 유의한 차이가 있습니다" if p_val < 0.05 else "통계적으로 유의한 차이가 없습니다"
-                        st.info(
-                            f"**해석**: {factor_col}에 따른 {dv_col}의 평균은 F({df1:.0f}, {df2:.0f}) = {f_val:.3f}, "
-                            f"p = {p_val:.3f}로 집단 간 **{sig_txt}** (p {'<' if p_val < 0.05 else '≥'} .05). "
-                            f"효과크기(partial η² = {eta2:.3f})."
-                        )
-
-                        if p_val < 0.05 and len(groups) > 2:
-                            st.markdown("##### 📋 사후검정 (Tukey HSD)")
-                            posthoc = pg.pairwise_tukey(data=work, dv=dv_col, between=factor_col)
-                            col_meanA = _pg_col(posthoc, 'mean(A)', 'mean_A')
-                            col_meanB = _pg_col(posthoc, 'mean(B)', 'mean_B')
-                            col_ptukey = _pg_col(posthoc, 'p-tukey', 'p_tukey', 'p-corr', 'p_corr')
-                            st.dataframe(posthoc.style.format(
-                                {col_meanA: '{:.3f}', col_meanB: '{:.3f}', 'diff': '{:.3f}',
-                                 'se': '{:.3f}', 'T': '{:.3f}', col_ptukey: '{:.4f}'}
-                            ), use_container_width=True)
-                            st.caption("↳ 유의(p < .05)한 쌍이 실제로 서로 다른 집단입니다.")
-
-            # ---------------------------------------------------------
-            # 3) 이원분산분석 (2×2 요인설계)
-            # ---------------------------------------------------------
-            elif analysis_type == "다요인분산분석 (Two-way ANOVA 이상 / 요인설계)":
-                st.markdown("#### ⚙️ 변수 설정")
-                c1, c2 = st.columns(2)
-                with c1:
-                    dv_col = st.selectbox("종속변수 (연속형)", numeric_cols, key="anova2_dv")
-                with c2:
-                    # [수정] "요인 1 / 요인 2" 슬롯 2개로 고정돼 있던 것을,
-                    # 요인이 2개보다 많은 설계(3요인 이상)도 가능하도록 multiselect로 확장.
-                    factor_cols = st.multiselect(
-                        "요인(집단)변수 - 2개 이상 선택 (3요인 이상 요인설계도 가능)",
-                        [c for c in all_cols if c != dv_col],
-                        key="anova2_factors"
-                    )
-
-                if st.button("▶️ 분산분석 실행", type="primary", key="btn_run_anova2"):
-                    if len(factor_cols) < 2:
-                        st.error("요인을 2개 이상 선택해주세요 (2개면 이원분산분석, 3개 이상이면 다요인분산분석).")
-                    elif len(set(factor_cols)) != len(factor_cols):
-                        st.error("서로 다른 요인을 선택해주세요.")
-                    else:
-                        work = stat_df[[dv_col] + factor_cols].dropna()
-
-                        desc = work.groupby(factor_cols)[dv_col].agg(['count', 'mean', 'std']).reset_index()
-                        desc.columns = factor_cols + ['N', '평균', '표준편차']
-                        st.markdown("##### 📋 셀별(요인 조합별) 기술통계량")
-                        st.dataframe(desc.style.format({'평균': '{:.3f}', '표준편차': '{:.3f}'}), use_container_width=True)
-
-                        aov2 = pg.anova(data=work, dv=dv_col, between=factor_cols, detailed=True)
-                        st.markdown(f"##### 📋 분산분석표 (주효과 {len(factor_cols)}개 + 모든 차수의 상호작용효과)")
-                        st.dataframe(aov2.style.format({
-                            'SS': '{:.3f}', 'MS': '{:.3f}', 'F': '{:.3f}', 'p_unc': '{:.4f}', 'np2': '{:.3f}'
-                        }, na_rep='-'), use_container_width=True)
-
-                        # 상호작용 행들을 차수(별표 개수) 순으로 정리해서 각각 해석
-                        interaction_rows = aov2[aov2['Source'].str.contains(r'\*', regex=True)].copy()
-                        if not interaction_rows.empty:
-                            interaction_rows['_order'] = interaction_rows['Source'].str.count(r'\*')
-                            interaction_rows = interaction_rows.sort_values('_order')
-                            msgs = []
-                            for _, row in interaction_rows.iterrows():
-                                sig = "유의" if row['p_unc'] < 0.05 else "비유의"
-                                msgs.append(f"{row['Source']}: F={row['F']:.3f}, p={row['p_unc']:.3f} ({sig})")
-                            st.info("**상호작용효과 요약**\n\n" + "\n\n".join(msgs) +
-                                    "\n\n↳ 가장 높은 차수의 상호작용부터 유의한지 확인하세요. "
-                                    "고차 상호작용이 유의하면 하위 주효과/저차 상호작용은 그 안에 묻혀 해석 의미가 줄어듭니다.")
-
-                        if len(factor_cols) == 2:
-                            st.markdown("##### 📊 셀 평균 그래프 (상호작용 패턴 확인용)")
-                            f1c, f2c = factor_cols
-                            pivot = work.groupby([f1c, f2c])[dv_col].mean().reset_index()
-                            st.line_chart(pivot.pivot(index=f1c, columns=f2c, values=dv_col))
-                        else:
-                            st.caption("📊 셀 평균 그래프는 요인이 정확히 2개일 때만 표시됩니다 "
-                                       "(3개 이상은 위의 셀별 기술통계표로 패턴을 확인해주세요).")
-
-            # ---------------------------------------------------------
-            # 4) 회귀분석
-            # ---------------------------------------------------------
-            elif analysis_type == "회귀분석 (다중회귀)":
-                st.markdown("#### ⚙️ 변수 설정")
-                c1, c2 = st.columns(2)
-                with c1:
-                    dv_col = st.selectbox("종속변수 (연속형)", numeric_cols, key="reg_dv")
-                with c2:
-                    # [수정] 이전에는 numeric_cols(숫자형)만 독립변수로 고를 수 있어서
-                    # 범주형(문자열) 변수는 선택지에 아예 안 나타났음.
-                    # 이제 전체 컬럼을 고를 수 있게 하고, 범주형이면 자동으로 더미변수로 변환한다.
-                    iv_cols = st.multiselect(
-                        "독립변수 (1개 이상 선택, 범주형도 선택 가능 - 자동으로 더미변수 처리됨)",
-                        [c for c in all_cols if c != dv_col],
-                        key="reg_iv"
-                    )
-
-                if iv_cols:
-                    iv_type_preview = {c: guess_scale_type(stat_df[c]) for c in iv_cols}
-                    preview_txt = " / ".join([f"{c}({t})" for c, t in iv_type_preview.items()])
-                    st.caption(f"🔎 척도 판단: {preview_txt}")
-
-                if st.button("▶️ 회귀분석 실행", type="primary", key="btn_run_reg"):
-                    if not iv_cols:
-                        st.error("독립변수를 1개 이상 선택해주세요.")
-                    else:
-                        work = stat_df[[dv_col] + iv_cols].dropna()
-
-                        # [추가] 독립변수별 척도 유형 판단 -> 범주형은 더미변수(가변수)로 변환
-                        design_parts = []
-                        continuous_iv_cols = []   # 표준화계수 계산 시 그대로 표준화할 변수
-                        dummy_ref_notes = []      # 해석 문장에 쓸 "기준집단" 안내
-                        for c in iv_cols:
-                            scale = guess_scale_type(work[c])
-                            if scale == "범주형":
-                                dummies = pd.get_dummies(work[c], prefix=c, drop_first=True, dtype=float)
-                                all_categories = sorted(work[c].dropna().unique().tolist(), key=str)
-                                dummy_categories = [col.split(f"{c}_", 1)[1] for col in dummies.columns]
-                                ref_category = [cat for cat in all_categories if str(cat) not in dummy_categories]
-                                ref_category = ref_category[0] if ref_category else all_categories[0]
-                                dummy_ref_notes.append(f"{c}(기준집단: {ref_category})")
-                                design_parts.append(dummies)
+                                if not vname:
+                                    errors.append(f"{fac}: 변수 이름을 입력해주세요.")
+                                elif vname in st.session_state['stat_df_working'].columns:
+                                    errors.append(f"{fac}: '{vname}' 이름이 이미 있습니다.")
+                            if errors:
+                                for e in errors:
+                                    st.error(e)
                             else:
-                                design_parts.append(work[[c]])
-                                continuous_iv_cols.append(c)
+                                for fac, items in factor_groups.items():
+                                    vname = name_inputs[fac].strip()
+                                    st.session_state['stat_df_working'][vname] = stat_df[items].mean(axis=1)
+                                st.success(f"✅ {len(factor_groups)}개 변수가 추가되었습니다: "
+                                           f"{', '.join(name_inputs[f].strip() for f in factor_groups)}")
+                                st.rerun()
 
-                        X_design = pd.concat(design_parts, axis=1)
-                        final_iv_names = list(X_design.columns)
-                        X = sm.add_constant(X_design)
-                        y = work[dv_col]
-                        reg_model = sm.OLS(y, X).fit()
+                # ---------------------------------------------------------
+                # 1) 독립표본 t-검정
+                # ---------------------------------------------------------
+                elif analysis_type == "독립표본 t-검정":
+                    st.markdown("#### ⚙️ 변수 설정")
+                    c1, c2 = st.columns(2)
+                    with c1:
+                        dv_col = st.selectbox("종속변수 (연속형)", numeric_cols, key="ttest_dv")
+                    with c2:
+                        group_col = st.selectbox("집단변수 (그룹 2개)", [c for c in all_cols if c != dv_col], key="ttest_group")
 
-                        if dummy_ref_notes:
-                            st.caption(f"📌 범주형 변수는 더미코딩되었습니다 — {', '.join(dummy_ref_notes)} "
-                                       f"(계수는 기준집단 대비 차이로 해석)")
+                    if st.button("▶️ t-검정 실행", type="primary", key="btn_run_ttest"):
+                        groups = stat_df[group_col].dropna().unique()
+                        if len(groups) != 2:
+                            st.error(f"집단변수는 정확히 2개 그룹이어야 합니다. 현재 {len(groups)}개 그룹입니다: {list(groups)}")
+                        else:
+                            g1_name, g2_name = groups[0], groups[1]
+                            g1 = stat_df.loc[stat_df[group_col] == g1_name, dv_col].dropna()
+                            g2 = stat_df.loc[stat_df[group_col] == g2_name, dv_col].dropna()
 
-                        st.markdown("##### 📋 모델 요약")
-                        r_val = np.sqrt(reg_model.rsquared)
-                        summary_table = pd.DataFrame({
-                            'R': [r_val], 'R²': [reg_model.rsquared],
-                            '수정된 R²': [reg_model.rsquared_adj],
-                            '표준오차(SE)': [np.sqrt(reg_model.mse_resid)]
-                        })
-                        st.dataframe(summary_table.style.format('{:.3f}'), use_container_width=True)
+                            desc_table = pd.DataFrame({
+                                '집단': [str(g1_name), str(g2_name)],
+                                'N': [len(g1), len(g2)],
+                                '평균': [g1.mean(), g2.mean()],
+                                '표준편차': [g1.std(), g2.std()],
+                                '표준오차': [g1.sem(), g2.sem()],
+                            })
+                            st.markdown("##### 📋 집단기술통계량")
+                            st.dataframe(desc_table.style.format(
+                                {'평균': '{:.3f}', '표준편차': '{:.3f}', '표준오차': '{:.3f}'}
+                            ), use_container_width=True)
 
-                        st.markdown("##### 📋 분산분석표 (ANOVA)")
-                        anova_reg = pd.DataFrame({
-                            '': ['회귀', '잔차', '전체'],
-                            '제곱합': [reg_model.ess, reg_model.ssr, reg_model.ess + reg_model.ssr],
-                            '자유도': [reg_model.df_model, reg_model.df_resid, reg_model.df_model + reg_model.df_resid],
-                            'F': [reg_model.fvalue, None, None],
-                            'p': [reg_model.f_pvalue, None, None],
-                        })
-                        st.dataframe(anova_reg.style.format(
-                            {'제곱합': '{:.3f}', '자유도': '{:.0f}', 'F': '{:.3f}', 'p': '{:.4f}'}, na_rep='-'
-                        ), use_container_width=True)
+                            levene_stat, levene_p = scipy_stats.levene(g1, g2)
+                            equal_var = levene_p > 0.05
+                            st.markdown("##### 📋 등분산 검정 (Levene)")
+                            st.dataframe(pd.DataFrame({
+                                'F': [levene_stat], 'p': [levene_p],
+                                '등분산 가정': ['가정됨 (등분산 t 사용)' if equal_var else '가정 안 됨 (Welch t 사용)']
+                            }).style.format({'F': '{:.3f}', 'p': '{:.3f}'}), use_container_width=True)
 
-                        st.markdown("##### 📋 계수표")
-                        # [수정] 표준화계수는 원래 연속형 변수의 의미(1SD 변화당 효과)를 갖기 때문에,
-                        # 더미(0/1) 변수까지 포함해서 표준화해도 계산은 되지만 해석이 애매해질 수 있음.
-                        # 그래도 SPSS 등 실무 관행에 맞춰 전체 변수(더미 포함)를 표준화해 함께 제공하되,
-                        # 더미 변수의 표준화계수는 해석 시 주의가 필요하다는 점을 안내한다.
-                        std_work = pd.concat([y, X_design], axis=1).copy()
-                        for col in std_work.columns:
-                            sd = std_work[col].std()
-                            std_work[col] = (std_work[col] - std_work[col].mean()) / sd if sd not in (0, None) else 0
-                        X_std = std_work[final_iv_names]
-                        y_std = std_work[dv_col]
-                        beta_model = sm.OLS(y_std, X_std).fit()
+                            pg_result = pg.ttest(g1, g2, correction=not equal_var)
+                            col_p = _pg_col(pg_result, 'p-val', 'p_val')
+                            col_d = _pg_col(pg_result, 'cohen-d', 'cohen_d')
+                            col_power = _pg_col(pg_result, 'power')
+                            st.markdown("##### 📋 t-검정 결과")
+                            st.dataframe(pg_result.style.format({
+                                'T': '{:.3f}', 'dof': '{:.2f}', col_p: '{:.4f}',
+                                col_d: '{:.3f}', col_power: '{:.3f}'
+                            }), use_container_width=True)
 
-                        vif_vals = ["-"] + [
-                            round(variance_inflation_factor(X.values, i), 3)
-                            for i in range(1, X.shape[1])
-                        ]
-                        coef_table = pd.DataFrame({
-                            '변수': ['(상수)'] + final_iv_names,
-                            'B': reg_model.params.values,
-                            'SE': reg_model.bse.values,
-                            'β(표준화)': [None] + list(beta_model.params.values),
-                            't': reg_model.tvalues.values,
-                            'p': reg_model.pvalues.values,
-                            'VIF': vif_vals,
-                        })
-                        st.dataframe(coef_table.style.format(
-                            {'B': '{:.3f}', 'SE': '{:.3f}', 'β(표준화)': '{:.3f}', 't': '{:.3f}', 'p': '{:.4f}'},
-                            na_rep='-'
-                        ), use_container_width=True)
-                        if len(final_iv_names) > len(iv_cols):
-                            st.caption("↳ 더미변수의 표준화계수(β)는 '1표준편차 변화당 효과'라는 원래 의미가 "
-                                       "잘 들어맞지 않을 수 있어 참고용으로만 봐주세요. B(비표준화계수)가 더 정확한 해석입니다.")
+                            t_val = pg_result['T'].iloc[0]
+                            p_val = pg_result[col_p].iloc[0]
+                            dof = pg_result['dof'].iloc[0]
+                            d_val = pg_result[col_d].iloc[0]
+                            sig_txt = "통계적으로 유의합니다" if p_val < 0.05 else "통계적으로 유의하지 않습니다"
+                            st.info(
+                                f"**해석**: {g1_name} 집단(M={g1.mean():.2f}, SD={g1.std():.2f})과 "
+                                f"{g2_name} 집단(M={g2.mean():.2f}, SD={g2.std():.2f}) 간 평균 차이는 "
+                                f"t({dof:.1f}) = {t_val:.3f}, p = {p_val:.3f}로 **{sig_txt}** (p {'<' if p_val < 0.05 else '≥'} .05). "
+                                f"효과크기(Cohen's d = {d_val:.3f})는 "
+                                f"{'작은' if abs(d_val) < 0.5 else ('중간' if abs(d_val) < 0.8 else '큰')} 편입니다."
+                            )
 
-                        sig_txt = "통계적으로 유의합니다" if reg_model.f_pvalue < 0.05 else "통계적으로 유의하지 않습니다"
-                        high_vif = [v for v, x in zip(vif_vals[1:], final_iv_names) if isinstance(v, (int, float)) and v > 10]
-                        st.info(
-                            f"**해석**: 회귀모형은 F({reg_model.df_model:.0f}, {reg_model.df_resid:.0f}) = "
-                            f"{reg_model.fvalue:.3f}, p = {reg_model.f_pvalue:.3f}로 **{sig_txt}** "
-                            f"(p {'<' if reg_model.f_pvalue < 0.05 else '≥'} .05). "
-                            f"독립변수들은 종속변수 분산의 {reg_model.rsquared*100:.1f}%를 설명합니다(R² = {reg_model.rsquared:.3f}). "
-                            + (f"⚠️ VIF가 10을 넘는 변수({', '.join(map(str, high_vif))})가 있어 다중공선성을 의심해볼 필요가 있습니다."
-                               if high_vif else "VIF는 모두 10 미만으로 다중공선성 문제는 크지 않아 보입니다.")
+                # ---------------------------------------------------------
+                # 2) 일원분산분석
+                # ---------------------------------------------------------
+                elif analysis_type == "일원분산분석 (One-way ANOVA)":
+                    st.markdown("#### ⚙️ 변수 설정")
+                    c1, c2 = st.columns(2)
+                    with c1:
+                        dv_col = st.selectbox("종속변수 (연속형)", numeric_cols, key="anova1_dv")
+                    with c2:
+                        factor_col = st.selectbox("요인(집단)변수 (3개 이상 그룹 권장)", [c for c in all_cols if c != dv_col], key="anova1_factor")
+
+                    if st.button("▶️ 일원분산분석 실행", type="primary", key="btn_run_anova1"):
+                        work = stat_df[[dv_col, factor_col]].dropna()
+                        groups = work[factor_col].unique()
+                        if len(groups) < 2:
+                            st.error("요인변수에 그룹이 2개 이상 있어야 합니다.")
+                        else:
+                            desc = work.groupby(factor_col)[dv_col].agg(['count', 'mean', 'std']).reset_index()
+                            desc.columns = ['집단', 'N', '평균', '표준편차']
+                            st.markdown("##### 📋 집단별 기술통계량")
+                            st.dataframe(desc.style.format({'평균': '{:.3f}', '표준편차': '{:.3f}'}), use_container_width=True)
+
+                            aov = pg.anova(data=work, dv=dv_col, between=factor_col, detailed=True)
+                            st.markdown("##### 📋 분산분석표 (ANOVA)")
+                            st.dataframe(aov.style.format({
+                                'SS': '{:.3f}', 'MS': '{:.3f}', 'F': '{:.3f}', 'p_unc': '{:.4f}', 'np2': '{:.3f}'
+                            }, na_rep='-'), use_container_width=True)
+
+                            f_val = aov['F'].iloc[0]
+                            p_val = aov['p_unc'].iloc[0]
+                            eta2 = aov['np2'].iloc[0]
+                            df1, df2 = aov['DF'].iloc[0], aov['DF'].iloc[1]
+                            sig_txt = "통계적으로 유의한 차이가 있습니다" if p_val < 0.05 else "통계적으로 유의한 차이가 없습니다"
+                            st.info(
+                                f"**해석**: {factor_col}에 따른 {dv_col}의 평균은 F({df1:.0f}, {df2:.0f}) = {f_val:.3f}, "
+                                f"p = {p_val:.3f}로 집단 간 **{sig_txt}** (p {'<' if p_val < 0.05 else '≥'} .05). "
+                                f"효과크기(partial η² = {eta2:.3f})."
+                            )
+
+                            if p_val < 0.05 and len(groups) > 2:
+                                st.markdown("##### 📋 사후검정 (Tukey HSD)")
+                                posthoc = pg.pairwise_tukey(data=work, dv=dv_col, between=factor_col)
+                                col_meanA = _pg_col(posthoc, 'mean(A)', 'mean_A')
+                                col_meanB = _pg_col(posthoc, 'mean(B)', 'mean_B')
+                                col_ptukey = _pg_col(posthoc, 'p-tukey', 'p_tukey', 'p-corr', 'p_corr')
+                                st.dataframe(posthoc.style.format(
+                                    {col_meanA: '{:.3f}', col_meanB: '{:.3f}', 'diff': '{:.3f}',
+                                     'se': '{:.3f}', 'T': '{:.3f}', col_ptukey: '{:.4f}'}
+                                ), use_container_width=True)
+                                st.caption("↳ 유의(p < .05)한 쌍이 실제로 서로 다른 집단입니다.")
+
+                # ---------------------------------------------------------
+                # 3) 이원분산분석 (2×2 요인설계)
+                # ---------------------------------------------------------
+                elif analysis_type == "다요인분산분석 (Two-way ANOVA 이상 / 요인설계)":
+                    st.markdown("#### ⚙️ 변수 설정")
+                    c1, c2 = st.columns(2)
+                    with c1:
+                        dv_col = st.selectbox("종속변수 (연속형)", numeric_cols, key="anova2_dv")
+                    with c2:
+                        # [수정] "요인 1 / 요인 2" 슬롯 2개로 고정돼 있던 것을,
+                        # 요인이 2개보다 많은 설계(3요인 이상)도 가능하도록 multiselect로 확장.
+                        factor_cols = st.multiselect(
+                            "요인(집단)변수 - 2개 이상 선택 (3요인 이상 요인설계도 가능)",
+                            [c for c in all_cols if c != dv_col],
+                            key="anova2_factors"
                         )
-        elif stat_df is not None:
-            st.warning("업로드한 파일에 데이터가 없습니다.")
-    elif stat_file is not None:
-        st.info("파일이 선택되었습니다. 위의 '▶️ 분석 시작' 버튼을 눌러주세요.")
-    else:
-        st.info("CSV 또는 엑셀 파일을 업로드하면 t-검정 · 분산분석 · 회귀분석을 실행할 수 있습니다.")
+
+                    if st.button("▶️ 분산분석 실행", type="primary", key="btn_run_anova2"):
+                        if len(factor_cols) < 2:
+                            st.error("요인을 2개 이상 선택해주세요 (2개면 이원분산분석, 3개 이상이면 다요인분산분석).")
+                        elif len(set(factor_cols)) != len(factor_cols):
+                            st.error("서로 다른 요인을 선택해주세요.")
+                        else:
+                            work = stat_df[[dv_col] + factor_cols].dropna()
+
+                            desc = work.groupby(factor_cols)[dv_col].agg(['count', 'mean', 'std']).reset_index()
+                            desc.columns = factor_cols + ['N', '평균', '표준편차']
+                            st.markdown("##### 📋 셀별(요인 조합별) 기술통계량")
+                            st.dataframe(desc.style.format({'평균': '{:.3f}', '표준편차': '{:.3f}'}), use_container_width=True)
+
+                            aov2 = pg.anova(data=work, dv=dv_col, between=factor_cols, detailed=True)
+                            st.markdown(f"##### 📋 분산분석표 (주효과 {len(factor_cols)}개 + 모든 차수의 상호작용효과)")
+                            st.dataframe(aov2.style.format({
+                                'SS': '{:.3f}', 'MS': '{:.3f}', 'F': '{:.3f}', 'p_unc': '{:.4f}', 'np2': '{:.3f}'
+                            }, na_rep='-'), use_container_width=True)
+
+                            # 상호작용 행들을 차수(별표 개수) 순으로 정리해서 각각 해석
+                            interaction_rows = aov2[aov2['Source'].str.contains(r'\*', regex=True)].copy()
+                            if not interaction_rows.empty:
+                                interaction_rows['_order'] = interaction_rows['Source'].str.count(r'\*')
+                                interaction_rows = interaction_rows.sort_values('_order')
+                                msgs = []
+                                for _, row in interaction_rows.iterrows():
+                                    sig = "유의" if row['p_unc'] < 0.05 else "비유의"
+                                    msgs.append(f"{row['Source']}: F={row['F']:.3f}, p={row['p_unc']:.3f} ({sig})")
+                                st.info("**상호작용효과 요약**\n\n" + "\n\n".join(msgs) +
+                                        "\n\n↳ 가장 높은 차수의 상호작용부터 유의한지 확인하세요. "
+                                        "고차 상호작용이 유의하면 하위 주효과/저차 상호작용은 그 안에 묻혀 해석 의미가 줄어듭니다.")
+
+                            if len(factor_cols) == 2:
+                                st.markdown("##### 📊 셀 평균 그래프 (상호작용 패턴 확인용)")
+                                f1c, f2c = factor_cols
+                                pivot = work.groupby([f1c, f2c])[dv_col].mean().reset_index()
+                                st.line_chart(pivot.pivot(index=f1c, columns=f2c, values=dv_col))
+                            else:
+                                st.caption("📊 셀 평균 그래프는 요인이 정확히 2개일 때만 표시됩니다 "
+                                           "(3개 이상은 위의 셀별 기술통계표로 패턴을 확인해주세요).")
+
+                # ---------------------------------------------------------
+                # 4) 회귀분석
+                # ---------------------------------------------------------
+                elif analysis_type == "회귀분석 (다중회귀)":
+                    st.markdown("#### ⚙️ 변수 설정")
+                    c1, c2 = st.columns(2)
+                    with c1:
+                        dv_col = st.selectbox("종속변수 (연속형)", numeric_cols, key="reg_dv")
+                    with c2:
+                        # [수정] 이전에는 numeric_cols(숫자형)만 독립변수로 고를 수 있어서
+                        # 범주형(문자열) 변수는 선택지에 아예 안 나타났음.
+                        # 이제 전체 컬럼을 고를 수 있게 하고, 범주형이면 자동으로 더미변수로 변환한다.
+                        iv_cols = st.multiselect(
+                            "독립변수 (1개 이상 선택, 범주형도 선택 가능 - 자동으로 더미변수 처리됨)",
+                            [c for c in all_cols if c != dv_col],
+                            key="reg_iv"
+                        )
+
+                    if iv_cols:
+                        iv_type_preview = {c: guess_scale_type(stat_df[c]) for c in iv_cols}
+                        preview_txt = " / ".join([f"{c}({t})" for c, t in iv_type_preview.items()])
+                        st.caption(f"🔎 척도 판단: {preview_txt}")
+
+                    if st.button("▶️ 회귀분석 실행", type="primary", key="btn_run_reg"):
+                        if not iv_cols:
+                            st.error("독립변수를 1개 이상 선택해주세요.")
+                        else:
+                            work = stat_df[[dv_col] + iv_cols].dropna()
+
+                            # [추가] 독립변수별 척도 유형 판단 -> 범주형은 더미변수(가변수)로 변환
+                            design_parts = []
+                            continuous_iv_cols = []   # 표준화계수 계산 시 그대로 표준화할 변수
+                            dummy_ref_notes = []      # 해석 문장에 쓸 "기준집단" 안내
+                            for c in iv_cols:
+                                scale = guess_scale_type(work[c])
+                                if scale == "범주형":
+                                    dummies = pd.get_dummies(work[c], prefix=c, drop_first=True, dtype=float)
+                                    all_categories = sorted(work[c].dropna().unique().tolist(), key=str)
+                                    dummy_categories = [col.split(f"{c}_", 1)[1] for col in dummies.columns]
+                                    ref_category = [cat for cat in all_categories if str(cat) not in dummy_categories]
+                                    ref_category = ref_category[0] if ref_category else all_categories[0]
+                                    dummy_ref_notes.append(f"{c}(기준집단: {ref_category})")
+                                    design_parts.append(dummies)
+                                else:
+                                    design_parts.append(work[[c]])
+                                    continuous_iv_cols.append(c)
+
+                            X_design = pd.concat(design_parts, axis=1)
+                            final_iv_names = list(X_design.columns)
+                            X = sm.add_constant(X_design)
+                            y = work[dv_col]
+                            reg_model = sm.OLS(y, X).fit()
+
+                            if dummy_ref_notes:
+                                st.caption(f"📌 범주형 변수는 더미코딩되었습니다 — {', '.join(dummy_ref_notes)} "
+                                           f"(계수는 기준집단 대비 차이로 해석)")
+
+                            st.markdown("##### 📋 모델 요약")
+                            r_val = np.sqrt(reg_model.rsquared)
+                            summary_table = pd.DataFrame({
+                                'R': [r_val], 'R²': [reg_model.rsquared],
+                                '수정된 R²': [reg_model.rsquared_adj],
+                                '표준오차(SE)': [np.sqrt(reg_model.mse_resid)]
+                            })
+                            st.dataframe(summary_table.style.format('{:.3f}'), use_container_width=True)
+
+                            st.markdown("##### 📋 분산분석표 (ANOVA)")
+                            anova_reg = pd.DataFrame({
+                                '': ['회귀', '잔차', '전체'],
+                                '제곱합': [reg_model.ess, reg_model.ssr, reg_model.ess + reg_model.ssr],
+                                '자유도': [reg_model.df_model, reg_model.df_resid, reg_model.df_model + reg_model.df_resid],
+                                'F': [reg_model.fvalue, None, None],
+                                'p': [reg_model.f_pvalue, None, None],
+                            })
+                            st.dataframe(anova_reg.style.format(
+                                {'제곱합': '{:.3f}', '자유도': '{:.0f}', 'F': '{:.3f}', 'p': '{:.4f}'}, na_rep='-'
+                            ), use_container_width=True)
+
+                            st.markdown("##### 📋 계수표")
+                            # [수정] 표준화계수는 원래 연속형 변수의 의미(1SD 변화당 효과)를 갖기 때문에,
+                            # 더미(0/1) 변수까지 포함해서 표준화해도 계산은 되지만 해석이 애매해질 수 있음.
+                            # 그래도 SPSS 등 실무 관행에 맞춰 전체 변수(더미 포함)를 표준화해 함께 제공하되,
+                            # 더미 변수의 표준화계수는 해석 시 주의가 필요하다는 점을 안내한다.
+                            std_work = pd.concat([y, X_design], axis=1).copy()
+                            for col in std_work.columns:
+                                sd = std_work[col].std()
+                                std_work[col] = (std_work[col] - std_work[col].mean()) / sd if sd not in (0, None) else 0
+                            X_std = std_work[final_iv_names]
+                            y_std = std_work[dv_col]
+                            beta_model = sm.OLS(y_std, X_std).fit()
+
+                            vif_vals = ["-"] + [
+                                round(variance_inflation_factor(X.values, i), 3)
+                                for i in range(1, X.shape[1])
+                            ]
+                            coef_table = pd.DataFrame({
+                                '변수': ['(상수)'] + final_iv_names,
+                                'B': reg_model.params.values,
+                                'SE': reg_model.bse.values,
+                                'β(표준화)': [None] + list(beta_model.params.values),
+                                't': reg_model.tvalues.values,
+                                'p': reg_model.pvalues.values,
+                                'VIF': vif_vals,
+                            })
+                            st.dataframe(coef_table.style.format(
+                                {'B': '{:.3f}', 'SE': '{:.3f}', 'β(표준화)': '{:.3f}', 't': '{:.3f}', 'p': '{:.4f}'},
+                                na_rep='-'
+                            ), use_container_width=True)
+                            if len(final_iv_names) > len(iv_cols):
+                                st.caption("↳ 더미변수의 표준화계수(β)는 '1표준편차 변화당 효과'라는 원래 의미가 "
+                                           "잘 들어맞지 않을 수 있어 참고용으로만 봐주세요. B(비표준화계수)가 더 정확한 해석입니다.")
+
+                            sig_txt = "통계적으로 유의합니다" if reg_model.f_pvalue < 0.05 else "통계적으로 유의하지 않습니다"
+                            high_vif = [v for v, x in zip(vif_vals[1:], final_iv_names) if isinstance(v, (int, float)) and v > 10]
+                            st.info(
+                                f"**해석**: 회귀모형은 F({reg_model.df_model:.0f}, {reg_model.df_resid:.0f}) = "
+                                f"{reg_model.fvalue:.3f}, p = {reg_model.f_pvalue:.3f}로 **{sig_txt}** "
+                                f"(p {'<' if reg_model.f_pvalue < 0.05 else '≥'} .05). "
+                                f"독립변수들은 종속변수 분산의 {reg_model.rsquared*100:.1f}%를 설명합니다(R² = {reg_model.rsquared:.3f}). "
+                                + (f"⚠️ VIF가 10을 넘는 변수({', '.join(map(str, high_vif))})가 있어 다중공선성을 의심해볼 필요가 있습니다."
+                                   if high_vif else "VIF는 모두 10 미만으로 다중공선성 문제는 크지 않아 보입니다.")
+                            )
+            elif stat_df is not None:
+                st.warning("업로드한 파일에 데이터가 없습니다.")
+        elif stat_file is not None:
+            st.info("파일이 선택되었습니다. 위의 '▶️ 분석 시작' 버튼을 눌러주세요.")
+        else:
+            st.info("CSV 또는 엑셀 파일을 업로드하면 t-검정 · 분산분석 · 회귀분석을 실행할 수 있습니다.")
 
 # [탭 4] 관리자 전용 관리
 if is_admin:
@@ -2034,24 +2053,4 @@ if is_admin:
         if st.session_state.get('dup_preview'):
             previews = st.session_state['dup_preview']
             drop_nos = st.session_state['dup_drop_nos']
-            if not previews:
-                st.info("중복으로 판단되는 논문이 없습니다.")
-            else:
-                st.warning(f"총 {len(previews)}개 그룹, {len(drop_nos)}건이 삭제 대상입니다. 삭제 전 아래 내용을 꼭 확인해주세요.")
-                for p in previews:
-                    with st.container(border=True):
-                        st.markdown(f"**📄 {p['title']}**")
-                        st.write(f"✅ 유지: No.{p['keep_no']} (완성도 {p['keep_completeness']}개 필드)")
-                        for dno, dcomp in zip(p['drop_nos'], p['drop_completeness']):
-                            st.write(f"🗑️ 삭제 예정: No.{dno} (완성도 {dcomp}개 필드)")
-
-                if st.button("⚠️ 위 목록대로 중복 삭제 실행 (되돌릴 수 없음)", type="primary"):
-                    load_master_excel.clear()
-                    fresh_df, fresh_sha = load_master_excel()
-                    cleaned = fresh_df[~fresh_df['No.'].isin(drop_nos)].reset_index(drop=True)
-                    cleaned['No.'] = range(1, len(cleaned) + 1)
-                    save_master_excel(cleaned, fresh_sha)
-                    load_master_excel.clear()
-                    st.success(f"중복 {len(drop_nos)}건을 삭제하고 No.를 다시 정렬했습니다. 페이지를 새로고침하세요.")
-                    del st.session_state['dup_preview']
-                    del st.session_state['dup_drop_nos']
+            if 
