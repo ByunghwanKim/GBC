@@ -824,7 +824,7 @@ if not st.session_state.get('_app_warmed_up', False):
     st.session_state['_app_warmed_up'] = True
     st.rerun()
 
-tab_names = ["🔍 연구 논문 DB 검색", "🌐 Semantic Scholar 검색", "🚀 논문 파일 업로드", "📊 통계 분석 (파일럿)"]
+tab_names = ["🔍 연구 논문 DB 검색", "🌐 Semantic Scholar 검색", "🚀 논문 파일 업로드", "📊 통계 분석 (준비중)"]
 if is_admin:
     tab_names.append("⚙️ 관리자 전용 관리 (DB/다운로드)")
 
