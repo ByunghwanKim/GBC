@@ -824,7 +824,7 @@ if not st.session_state.get('_app_warmed_up', False):
     st.session_state['_app_warmed_up'] = True
     st.rerun()
 
-tab_names = ["🔍 연구 논문 DB 검색", "🌐 Semantic Scholar 검색", "🚀 논문 파일 업로드", "📊 통계 분석 (파일럿)"]
+tab_names = ["🔍 연구 논문 DB 검색", "🌐 Semantic Scholar 검색", "🚀 논문 파일 업로드", "📊 통계분석(준비중)"]
 if is_admin:
     tab_names.append("⚙️ 관리자 전용 관리 (DB/다운로드)")
 
@@ -1358,7 +1358,7 @@ with tabs[2]:
 
 # [탭 4] 통계 분석 (파일럿 테스트)
 with tabs[3]:
-    st.subheader("📊 통계 분석 (파일럿 테스트)")
+    st.subheader("📊 통계분석(준비중)")
 
     # [추가] 이 탭 전용 비밀번호 게이트. 다른 탭(논문 DB 검색 등)은 그대로 열려있고,
     # 통계 분석 탭만 별도 비밀번호가 있어야 내용이 보이도록 함.
@@ -1426,14 +1426,14 @@ with tabs[3]:
                 # [추가] 척도 유형 기반 분석 추천 가이드
                 # -----------------------------------------------------
                 with st.expander("🧭 어떤 분석을 써야 할지 모르겠다면 - 변수 골라서 추천받기", expanded=False):
-                    st.caption("종속변수와 독립변수를 골라주시면, 두 변수의 척도 유형(연속형/범주형)을 "
+                    st.caption("독립변수와 종속변수를 골라주시면, 두 변수의 척도 유형(연속형/범주형)을 "
                                "자동으로 판단해서 적합한 분석을 추천해드립니다. "
                                "(5~9점 사이 정수 응답은 리커트 척도로 보고 연속형으로 처리합니다.)")
                     gc1, gc2 = st.columns(2)
                     with gc1:
-                        guide_dv = st.selectbox("종속변수(DV)", all_cols, key="guide_dv")
-                    with gc2:
                         guide_iv = st.multiselect("독립변수(IV) - 1~2개 선택", all_cols, key="guide_iv")
+                    with gc2:
+                        guide_dv = st.selectbox("종속변수(DV)", [c for c in all_cols if c not in guide_iv], key="guide_dv")
 
                     if guide_dv and guide_iv:
                         auto_dv_type = guess_scale_type(stat_df[guide_dv])
