@@ -1736,22 +1736,55 @@ with tabs[3]:
                 st.markdown("#### ⚙️ 변수 설정")
                 c1, c2 = st.columns(2)
                 with c1:
-                    dv_col = st.selectbox("종속변수", numeric_cols, key="reg_dv")
+                    dv_col = st.selectbox("종속변수 (연속형)", numeric_cols, key="reg_dv")
                 with c2:
+                    # [수정] 이전에는 numeric_cols(숫자형)만 독립변수로 고를 수 있어서
+                    # 범주형(문자열) 변수는 선택지에 아예 안 나타났음.
+                    # 이제 전체 컬럼을 고를 수 있게 하고, 범주형이면 자동으로 더미변수로 변환한다.
                     iv_cols = st.multiselect(
-                        "독립변수 (1개 이상 선택)",
-                        [c for c in numeric_cols if c != dv_col],
+                        "독립변수 (1개 이상 선택, 범주형도 선택 가능 - 자동으로 더미변수 처리됨)",
+                        [c for c in all_cols if c != dv_col],
                         key="reg_iv"
                     )
+
+                if iv_cols:
+                    iv_type_preview = {c: guess_scale_type(stat_df[c]) for c in iv_cols}
+                    preview_txt = " / ".join([f"{c}({t})" for c, t in iv_type_preview.items()])
+                    st.caption(f"🔎 척도 판단: {preview_txt}")
 
                 if st.button("▶️ 회귀분석 실행", type="primary", key="btn_run_reg"):
                     if not iv_cols:
                         st.error("독립변수를 1개 이상 선택해주세요.")
                     else:
                         work = stat_df[[dv_col] + iv_cols].dropna()
-                        X = sm.add_constant(work[iv_cols])
+
+                        # [추가] 독립변수별 척도 유형 판단 -> 범주형은 더미변수(가변수)로 변환
+                        design_parts = []
+                        continuous_iv_cols = []   # 표준화계수 계산 시 그대로 표준화할 변수
+                        dummy_ref_notes = []      # 해석 문장에 쓸 "기준집단" 안내
+                        for c in iv_cols:
+                            scale = guess_scale_type(work[c])
+                            if scale == "범주형":
+                                dummies = pd.get_dummies(work[c], prefix=c, drop_first=True, dtype=float)
+                                all_categories = sorted(work[c].dropna().unique().tolist(), key=str)
+                                dummy_categories = [col.split(f"{c}_", 1)[1] for col in dummies.columns]
+                                ref_category = [cat for cat in all_categories if str(cat) not in dummy_categories]
+                                ref_category = ref_category[0] if ref_category else all_categories[0]
+                                dummy_ref_notes.append(f"{c}(기준집단: {ref_category})")
+                                design_parts.append(dummies)
+                            else:
+                                design_parts.append(work[[c]])
+                                continuous_iv_cols.append(c)
+
+                        X_design = pd.concat(design_parts, axis=1)
+                        final_iv_names = list(X_design.columns)
+                        X = sm.add_constant(X_design)
                         y = work[dv_col]
                         reg_model = sm.OLS(y, X).fit()
+
+                        if dummy_ref_notes:
+                            st.caption(f"📌 범주형 변수는 더미코딩되었습니다 — {', '.join(dummy_ref_notes)} "
+                                       f"(계수는 기준집단 대비 차이로 해석)")
 
                         st.markdown("##### 📋 모델 요약")
                         r_val = np.sqrt(reg_model.rsquared)
@@ -1775,10 +1808,15 @@ with tabs[3]:
                         ), use_container_width=True)
 
                         st.markdown("##### 📋 계수표")
-                        std_work = work.copy()
-                        for col in [dv_col] + iv_cols:
-                            std_work[col] = (std_work[col] - std_work[col].mean()) / std_work[col].std()
-                        X_std = std_work[iv_cols]
+                        # [수정] 표준화계수는 원래 연속형 변수의 의미(1SD 변화당 효과)를 갖기 때문에,
+                        # 더미(0/1) 변수까지 포함해서 표준화해도 계산은 되지만 해석이 애매해질 수 있음.
+                        # 그래도 SPSS 등 실무 관행에 맞춰 전체 변수(더미 포함)를 표준화해 함께 제공하되,
+                        # 더미 변수의 표준화계수는 해석 시 주의가 필요하다는 점을 안내한다.
+                        std_work = pd.concat([y, X_design], axis=1).copy()
+                        for col in std_work.columns:
+                            sd = std_work[col].std()
+                            std_work[col] = (std_work[col] - std_work[col].mean()) / sd if sd not in (0, None) else 0
+                        X_std = std_work[final_iv_names]
                         y_std = std_work[dv_col]
                         beta_model = sm.OLS(y_std, X_std).fit()
 
@@ -1787,7 +1825,7 @@ with tabs[3]:
                             for i in range(1, X.shape[1])
                         ]
                         coef_table = pd.DataFrame({
-                            '변수': ['(상수)'] + iv_cols,
+                            '변수': ['(상수)'] + final_iv_names,
                             'B': reg_model.params.values,
                             'SE': reg_model.bse.values,
                             'β(표준화)': [None] + list(beta_model.params.values),
@@ -1799,9 +1837,12 @@ with tabs[3]:
                             {'B': '{:.3f}', 'SE': '{:.3f}', 'β(표준화)': '{:.3f}', 't': '{:.3f}', 'p': '{:.4f}'},
                             na_rep='-'
                         ), use_container_width=True)
+                        if len(final_iv_names) > len(iv_cols):
+                            st.caption("↳ 더미변수의 표준화계수(β)는 '1표준편차 변화당 효과'라는 원래 의미가 "
+                                       "잘 들어맞지 않을 수 있어 참고용으로만 봐주세요. B(비표준화계수)가 더 정확한 해석입니다.")
 
                         sig_txt = "통계적으로 유의합니다" if reg_model.f_pvalue < 0.05 else "통계적으로 유의하지 않습니다"
-                        high_vif = [v for v, x in zip(vif_vals[1:], iv_cols) if isinstance(v, (int, float)) and v > 10]
+                        high_vif = [v for v, x in zip(vif_vals[1:], final_iv_names) if isinstance(v, (int, float)) and v > 10]
                         st.info(
                             f"**해석**: 회귀모형은 F({reg_model.df_model:.0f}, {reg_model.df_resid:.0f}) = "
                             f"{reg_model.fvalue:.3f}, p = {reg_model.f_pvalue:.3f}로 **{sig_txt}** "
