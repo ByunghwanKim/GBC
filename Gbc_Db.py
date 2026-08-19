@@ -184,7 +184,21 @@ genai.configure(api_key=GEMINI_API_KEY)
 # 선택하지만, 할당량 소진 시 generate_content_with_fallback()이 이 리스트를 순회한다)
 # [수정] gemini-2.5-flash, gemini-2.0-flash는 이미 단종되어 404를 반환하므로 목록에서 제거.
 # 현재 유효한 모델만 남김.
-GEMINI_MODEL_PRIORITY = ['gemini-3.6-flash', 'gemini-3.7-flash', 'gemini-3.5-flash', 'gemini-3.5-flash-lite', 'gemini-1.5-pro', 'gemini-1.5-flash']
+# [수정] 사용자가 직접 확인한 지원 모델 전체 목록으로 갱신 (2026년 8월 기준).
+# 순서는 최신/저비용 Flash 모델을 우선하고, 안 되면 상위 Pro 모델,
+# 마지막으로 2.5 구세대 모델까지 전부 시도하도록 구성.
+GEMINI_MODEL_PRIORITY = [
+    'gemini-3.6-flash',
+    'gemini-3.7-flash',
+    'gemini-3.5-flash',
+    'gemini-3.5-flash-lite',
+    'gemini-3.1-flash-lite',
+    'gemini-3-flash',
+    'gemini-3.1-pro',
+    'gemini-2.5-pro',
+    'gemini-2.5-flash',
+    'gemini-2.5-flash-lite',
+]
 
 @st.cache_resource
 def get_available_gemini_model():
