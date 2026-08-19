@@ -1567,7 +1567,7 @@ with tabs[3]:
                 with c1:
                     dv_col = st.selectbox("종속변수 (연속형)", numeric_cols, key="ttest_dv")
                 with c2:
-                    group_col = st.selectbox("집단변수 (그룹 2개)", all_cols, key="ttest_group")
+                    group_col = st.selectbox("집단변수 (그룹 2개)", [c for c in all_cols if c != dv_col], key="ttest_group")
 
                 if st.button("▶️ t-검정 실행", type="primary", key="btn_run_ttest"):
                     groups = stat_df[group_col].dropna().unique()
@@ -1630,7 +1630,7 @@ with tabs[3]:
                 with c1:
                     dv_col = st.selectbox("종속변수 (연속형)", numeric_cols, key="anova1_dv")
                 with c2:
-                    factor_col = st.selectbox("요인(집단)변수 (3개 이상 그룹 권장)", all_cols, key="anova1_factor")
+                    factor_col = st.selectbox("요인(집단)변수 (3개 이상 그룹 권장)", [c for c in all_cols if c != dv_col], key="anova1_factor")
 
                 if st.button("▶️ 일원분산분석 실행", type="primary", key="btn_run_anova1"):
                     work = stat_df[[dv_col, factor_col]].dropna()
@@ -1681,9 +1681,9 @@ with tabs[3]:
                 with c1:
                     dv_col = st.selectbox("종속변수 (연속형)", numeric_cols, key="anova2_dv")
                 with c2:
-                    factor1_col = st.selectbox("요인 1", all_cols, key="anova2_f1")
+                    factor1_col = st.selectbox("요인 1", [c for c in all_cols if c != dv_col], key="anova2_f1")
                 with c3:
-                    factor2_col = st.selectbox("요인 2", all_cols, key="anova2_f2")
+                    factor2_col = st.selectbox("요인 2", [c for c in all_cols if c != dv_col and c != factor1_col], key="anova2_f2")
 
                 if st.button("▶️ 이원분산분석 실행", type="primary", key="btn_run_anova2"):
                     if factor1_col == factor2_col:
