@@ -930,6 +930,9 @@ with tabs[2]:
     if 'uploader_key_counter' not in st.session_state:
         st.session_state['uploader_key_counter'] = 0
 
+    st.caption(f"🔧 업로더 인스턴스 #{st.session_state['uploader_key_counter']} "
+               f"(이 번호가 업로드마다 올라가는데도 파일이 안 지워지면 알려주세요)")
+
     if st.session_state.get('last_upload_summary'):
         summary = st.session_state.pop('last_upload_summary')
         st.success(summary['message'])
@@ -946,6 +949,13 @@ with tabs[2]:
         key=f"file_uploader_{st.session_state['uploader_key_counter']}",
         help="모바일 기기에서 파일이 보이지 않는 문제를 해결하기 위해 모든 파일 선택이 허용되도록 설정되었습니다. PDF(.pdf) 또는 엑셀(.xlsx) 파일을 선택해주세요."
     )
+
+    # [추가] 자동 초기화가 기대만큼 안 될 경우를 대비한 수동 초기화 버튼.
+    # 업로더 key를 강제로 바꿔서 완전히 새 위젯(빈 목록)으로 재생성한다.
+    if uploaded_files:
+        if st.button("🗑️ 선택 파일 목록 초기화", key="btn_clear_uploader"):
+            st.session_state['uploader_key_counter'] += 1
+            st.rerun()
     
     if st.button("파일 처리 및 마스터 DB에 누적 저장", type="primary"):
         if uploaded_files:
