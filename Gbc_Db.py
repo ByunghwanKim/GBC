@@ -3,6 +3,7 @@ import streamlit.components.v1 as components
 import pandas as pd
 import json
 import io
+import re
 import base64
 import html
 import textwrap
@@ -13,7 +14,7 @@ import time
 import google.generativeai as genai
 from google.api_core.exceptions import ResourceExhausted, NotFound
 from pypdf import PdfReader
-from github import Github
+from github import Github, GithubException
 from github.GithubException import UnknownObjectException
 import numpy as np
 from scipy import stats as scipy_stats
@@ -146,10 +147,18 @@ try:
     GITHUB_REPO = st.secrets["GITHUB_REPO"]
     ADMIN_PASSWORD = st.secrets.get("ADMIN_PASSWORD", "")
     S2_API_KEY = st.secrets.get("S2_API_KEY", "")
-    APP_PASSWORD = st.secrets.get("APP_PASSWORD", "gbc1234!")
-    STATS_PASSWORD = st.secrets.get("STATS_PASSWORD", "stats1234!")
+    # [수정] "인가된 사용자만 접근하는 비공개 데이터베이스"라고 안내하면서
+    # 정작 기본 비밀번호가 코드에 하드코딩되어 있어 Secrets 등록을 깜빡해도
+    # 그 기본값으로 접속이 가능했던 문제. 기본값을 빈 문자열로 바꾸고,
+    # 비어 있으면 아예 앱을 중단시켜서 "설정 안 하면 못 들어옴"을 강제한다.
+    APP_PASSWORD = st.secrets.get("APP_PASSWORD", "")
+    STATS_PASSWORD = st.secrets.get("STATS_PASSWORD", "")
 except Exception:
     st.error("⚠️ Streamlit Secrets 설정을 확인해주세요.")
+    st.stop()
+
+if not APP_PASSWORD:
+    st.error("⚠️ APP_PASSWORD가 설정되지 않았습니다. Secrets에 APP_PASSWORD를 등록해주세요.")
     st.stop()
 
 
@@ -298,7 +307,15 @@ def generate_content_with_fallback(prompt, max_retries_per_model=2):
     raise last_error if last_error else RuntimeError("Gemini 모델 호출에 모두 실패했습니다.")
 
 # GitHub 저장소 설정
-repo = Github(GITHUB_TOKEN).get_repo(GITHUB_REPO)
+# [수정] repo = Github(...).get_repo(...) 가 모듈 최상단에 있어서, Streamlit이
+# 스크립트를 재실행할 때마다(버튼 클릭은 물론 검색어 한 글자 입력할 때도) 매번
+# GitHub에 네트워크 호출이 발생했음. @st.cache_resource로 감싸서 세션 내내
+# 한 번만 연결하도록 함.
+@st.cache_resource
+def get_github_repo():
+    return Github(GITHUB_TOKEN).get_repo(GITHUB_REPO)
+
+repo = get_github_repo()
 EXCEL_FILE_PATH = "database/GBC_연구논문_DB.xlsx"
 
 DB_COLUMNS = [
@@ -340,20 +357,32 @@ def load_master_excel():
         empty_df = pd.DataFrame(columns=DB_COLUMNS)
         return empty_df, None
 
-def save_master_excel(df, sha):
+def save_master_excel(df, sha, _retry=True):
+    """[수정] load_master_excel이 15초간 캐싱되다 보니, 그 사이 다른 사용자가
+    저장하면 들고 있던 sha가 낡아버림. GitHub는 이때 409(가끔 422)를 반환하는데
+    기존에는 이 예외가 그대로 화면에 올라가 저장이 실패했음. 이제 409/422를 만나면
+    캐시를 지우고 최신 sha를 다시 받아와 한 번 재시도한다 (무한루프 방지로 1회만)."""
     buffer = io.BytesIO()
     with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
         df.to_excel(writer, index=False, sheet_name='Sheet1')
     content = buffer.getvalue()
-    if sha:
-        repo.update_file(EXCEL_FILE_PATH, "Update GBC 연구논문 DB", content, sha)
-    else:
-        repo.create_file(EXCEL_FILE_PATH, "Create GBC 연구논문 DB", content)
+    try:
+        if sha:
+            repo.update_file(EXCEL_FILE_PATH, "Update GBC 연구논문 DB", content, sha)
+        else:
+            repo.create_file(EXCEL_FILE_PATH, "Create GBC 연구논문 DB", content)
+    except GithubException as e:
+        if getattr(e, 'status', None) in (409, 422) and _retry:
+            load_master_excel.clear()
+            _, fresh_sha = load_master_excel()
+            return save_master_excel(df, fresh_sha, _retry=False)
+        raise
 
 def normalize_title(title):
-    import re
     s = str(title).strip().lower()
-    s = re.sub(r'[^\w가-힣]', '', s)
+    # [수정] 파이썬3 정규식의 \w는 유니코드 인식이라 이미 한글을 포함하므로
+    # [^\w가-힣]의 '가-힣' 부분은 중복. 동작에는 차이가 없지만 정리함.
+    s = re.sub(r'[^\w]', '', s)
     return s
 
 def find_duplicate_row(title, master_df):
@@ -1192,6 +1221,11 @@ with tabs[2]:
                                         processed_logs.append(f"🔄 [스마트 업데이트] No.{existing_no} '{title}' (기존 완성도 {old_score} ➔ 신규 {new_score})")
                                     else:
                                         processed_logs.append(f"⏭️ [기존 정보가 더 충실하여 유지] '{title}'")
+                                    # [수정] 신규 등록 때만 titles_seen_this_batch에 기록되고 있어서,
+                                    # 한 배치 안에 같은 논문(기존 DB에 이미 있는 논문)이 두 번 들어오면
+                                    # "스마트 업데이트"가 두 번 수행되는 문제가 있었음. 여기서도 기록한다.
+                                    if norm_title:
+                                        titles_seen_this_batch.add(norm_title)
                                     continue
 
                                 current_max_no += 1
@@ -1293,6 +1327,10 @@ with tabs[2]:
                                     processed_logs.append(f"🔄 [스마트 업데이트] No.{existing_no} '{pdf_title}' (기존 완성도 {old_score} ➔ 신규 {new_score})")
                                 else:
                                     processed_logs.append(f"⏭️ [기존 정보가 더 충실하여 유지] '{pdf_title}'")
+                                # [수정] PDF 경로도 동일하게, 기존 논문 업데이트 시에도
+                                # titles_seen_this_batch에 기록해서 같은 배치 내 중복 재처리를 막는다.
+                                if norm_title:
+                                    titles_seen_this_batch.add(norm_title)
                                 continue
 
                             current_max_no += 1
@@ -1320,10 +1358,16 @@ with tabs[2]:
                 if new_entries or updated_entries:
                     updated_df = master_df.copy()
 
+                    # [수정] 완성도 높은 쪽으로 "스마트 업데이트"할 때 행 전체를 그대로
+                    # 덮어써서, 새 데이터가 비워둔(또는 '-'인) 필드가 기존에 채워져 있던
+                    # 값까지 지워버리는 데이터 손실이 있었음. 값이 실제로 있는 필드만
+                    # 갱신하도록 해서, 기존 값과 신규 값 중 "있는 것"이 항상 남게 함.
                     for dup_no, row_dict in updated_entries.items():
                         mask = updated_df['No.'] == dup_no
                         for k, v in row_dict.items():
                             if k == 'No.':
+                                continue
+                            if pd.isna(v) or str(v).strip() in ('-', '', 'nan', 'None'):
                                 continue
                             updated_df.loc[mask, k] = v
 
@@ -1366,16 +1410,19 @@ with tabs[3]:
         st.session_state["stats_authenticated"] = False
 
     if not st.session_state["stats_authenticated"]:
-        st.info("🔒 이 탭은 별도 비밀번호가 필요합니다.")
-        with st.form("stats_login_form"):
-            stats_pw_input = st.text_input("통계 분석 탭 비밀번호", type="password", key="stats_pw_input")
-            stats_submitted = st.form_submit_button("입장")
-            if stats_submitted:
-                if stats_pw_input == STATS_PASSWORD:
-                    st.session_state["stats_authenticated"] = True
-                    st.rerun()
-                else:
-                    st.error("❌ 비밀번호가 일치하지 않습니다.")
+        if not STATS_PASSWORD:
+            st.error("⚠️ STATS_PASSWORD가 설정되지 않아 이 탭을 열 수 없습니다. Secrets에 STATS_PASSWORD를 등록해주세요.")
+        else:
+            st.info("🔒 이 탭은 별도 비밀번호가 필요합니다.")
+            with st.form("stats_login_form"):
+                stats_pw_input = st.text_input("통계 분석 탭 비밀번호", type="password", key="stats_pw_input")
+                stats_submitted = st.form_submit_button("입장")
+                if stats_submitted:
+                    if stats_pw_input == STATS_PASSWORD:
+                        st.session_state["stats_authenticated"] = True
+                        st.rerun()
+                    else:
+                        st.error("❌ 비밀번호가 일치하지 않습니다.")
     else:
         st.warning(
             "⚠️ 이 도구는 **파일럿 테스트/사전 점검용**입니다. 정식 논문에 쓰실 분석은 "
@@ -1426,14 +1473,14 @@ with tabs[3]:
                 # [추가] 척도 유형 기반 분석 추천 가이드
                 # -----------------------------------------------------
                 with st.expander("🧭 어떤 분석을 써야 할지 모르겠다면 - 변수 골라서 추천받기", expanded=False):
-                    st.caption("독립변수와 종속변수를 골라주시면, 두 변수의 척도 유형(연속형/범주형)을 "
+                    st.caption("종속변수와 독립변수를 골라주시면, 두 변수의 척도 유형(연속형/범주형)을 "
                                "자동으로 판단해서 적합한 분석을 추천해드립니다. "
                                "(5~9점 사이 정수 응답은 리커트 척도로 보고 연속형으로 처리합니다.)")
                     gc1, gc2 = st.columns(2)
                     with gc1:
-                        guide_iv = st.multiselect("독립변수(IV) - 1~2개 선택", all_cols, key="guide_iv")
+                        guide_dv = st.selectbox("종속변수(DV)", all_cols, key="guide_dv")
                     with gc2:
-                        guide_dv = st.selectbox("종속변수(DV)", [c for c in all_cols if c not in guide_iv], key="guide_dv")
+                        guide_iv = st.multiselect("독립변수(IV) - 1~2개 선택", [c for c in all_cols if c != guide_dv], key="guide_iv")
 
                     if guide_dv and guide_iv:
                         auto_dv_type = guess_scale_type(stat_df[guide_dv])
@@ -1493,7 +1540,7 @@ with tabs[3]:
 
                 analysis_type = st.selectbox(
                     "🔬 분석 유형 선택",
-                    ["신뢰도분석 (Cronbach's α)", "탐색적 요인분석 (EFA)",
+                    ["탐색적 요인분석 (EFA)", "신뢰도분석 (Cronbach's α)",
                      "독립표본 t-검정", "일원분산분석 (One-way ANOVA)",
                      "다요인분산분석 (Two-way ANOVA 이상 / 요인설계)", "회귀분석 (다중회귀)"]
                 )
@@ -1677,9 +1724,9 @@ with tabs[3]:
                     st.markdown("#### ⚙️ 변수 설정")
                     c1, c2 = st.columns(2)
                     with c1:
-                        group_col = st.selectbox("집단변수 (그룹 2개)", all_cols, key="ttest_group")
+                        dv_col = st.selectbox("종속변수 (연속형)", numeric_cols, key="ttest_dv")
                     with c2:
-                        dv_col = st.selectbox("종속변수 (연속형)", [c for c in numeric_cols if c != group_col], key="ttest_dv")
+                        group_col = st.selectbox("집단변수 (그룹 2개)", [c for c in all_cols if c != dv_col], key="ttest_group")
 
                     if st.button("▶️ t-검정 실행", type="primary", key="btn_run_ttest"):
                         groups = stat_df[group_col].dropna().unique()
@@ -1740,9 +1787,9 @@ with tabs[3]:
                     st.markdown("#### ⚙️ 변수 설정")
                     c1, c2 = st.columns(2)
                     with c1:
-                        factor_col = st.selectbox("요인(집단)변수 (3개 이상 그룹 권장)", all_cols, key="anova1_factor")
+                        dv_col = st.selectbox("종속변수 (연속형)", numeric_cols, key="anova1_dv")
                     with c2:
-                        dv_col = st.selectbox("종속변수 (연속형)", [c for c in numeric_cols if c != factor_col], key="anova1_dv")
+                        factor_col = st.selectbox("요인(집단)변수 (3개 이상 그룹 권장)", [c for c in all_cols if c != dv_col], key="anova1_factor")
 
                     if st.button("▶️ 일원분산분석 실행", type="primary", key="btn_run_anova1"):
                         work = stat_df[[dv_col, factor_col]].dropna()
@@ -1791,15 +1838,15 @@ with tabs[3]:
                     st.markdown("#### ⚙️ 변수 설정")
                     c1, c2 = st.columns(2)
                     with c1:
+                        dv_col = st.selectbox("종속변수 (연속형)", numeric_cols, key="anova2_dv")
+                    with c2:
                         # [수정] "요인 1 / 요인 2" 슬롯 2개로 고정돼 있던 것을,
                         # 요인이 2개보다 많은 설계(3요인 이상)도 가능하도록 multiselect로 확장.
                         factor_cols = st.multiselect(
                             "요인(집단)변수 - 2개 이상 선택 (3요인 이상 요인설계도 가능)",
-                            all_cols,
+                            [c for c in all_cols if c != dv_col],
                             key="anova2_factors"
                         )
-                    with c2:
-                        dv_col = st.selectbox("종속변수 (연속형)", [c for c in numeric_cols if c not in factor_cols], key="anova2_dv")
 
                     if st.button("▶️ 분산분석 실행", type="primary", key="btn_run_anova2"):
                         if len(factor_cols) < 2:
@@ -1849,16 +1896,16 @@ with tabs[3]:
                     st.markdown("#### ⚙️ 변수 설정")
                     c1, c2 = st.columns(2)
                     with c1:
+                        dv_col = st.selectbox("종속변수 (연속형)", numeric_cols, key="reg_dv")
+                    with c2:
                         # [수정] 이전에는 numeric_cols(숫자형)만 독립변수로 고를 수 있어서
                         # 범주형(문자열) 변수는 선택지에 아예 안 나타났음.
                         # 이제 전체 컬럼을 고를 수 있게 하고, 범주형이면 자동으로 더미변수로 변환한다.
                         iv_cols = st.multiselect(
                             "독립변수 (1개 이상 선택, 범주형도 선택 가능 - 자동으로 더미변수 처리됨)",
-                            all_cols,
+                            [c for c in all_cols if c != dv_col],
                             key="reg_iv"
                         )
-                    with c2:
-                        dv_col = st.selectbox("종속변수 (연속형)", [c for c in numeric_cols if c not in iv_cols], key="reg_dv")
 
                     if iv_cols:
                         iv_type_preview = {c: guess_scale_type(stat_df[c]) for c in iv_cols}
@@ -1898,6 +1945,40 @@ with tabs[3]:
                             if dummy_ref_notes:
                                 st.caption(f"📌 범주형 변수는 더미코딩되었습니다 — {', '.join(dummy_ref_notes)} "
                                            f"(계수는 기준집단 대비 차이로 해석)")
+
+                            # [추가] 표 1: 상관분석 (SPSS 회귀분석 출력 관례상 모델요약보다 먼저 제시)
+                            st.markdown("##### 📋 상관분석 (Correlations)")
+                            corr_data = pd.concat([y, X_design], axis=1)
+                            corr_matrix = corr_data.corr()
+                            st.dataframe(corr_matrix.style.format('{:.3f}').background_gradient(
+                                cmap='RdBu', vmin=-1, vmax=1, axis=None
+                            ), use_container_width=True)
+
+                            pval_matrix = pd.DataFrame(
+                                np.nan, index=corr_matrix.index, columns=corr_matrix.columns
+                            )
+                            for ci in corr_matrix.columns:
+                                for cj in corr_matrix.columns:
+                                    if ci != cj:
+                                        _, p_ij = scipy_stats.pearsonr(corr_data[ci], corr_data[cj])
+                                        pval_matrix.loc[ci, cj] = p_ij
+                            with st.expander("📋 상관계수 유의확률(p) 표 보기"):
+                                st.dataframe(pval_matrix.style.format('{:.4f}', na_rep='-'), use_container_width=True)
+
+                            high_corr_pairs = []
+                            cols_list = list(corr_matrix.columns)
+                            for i_idx in range(len(cols_list)):
+                                for j_idx in range(i_idx + 1, len(cols_list)):
+                                    ci, cj = cols_list[i_idx], cols_list[j_idx]
+                                    if ci == dv_col or cj == dv_col:
+                                        continue  # 종속변수와의 상관은 다중공선성과 무관하므로 제외
+                                    if abs(corr_matrix.loc[ci, cj]) >= 0.7:
+                                        high_corr_pairs.append(f"{ci}–{cj}(r={corr_matrix.loc[ci, cj]:.3f})")
+                            corr_note = "독립변수들 사이의 상관이 특별히 높지는 않습니다."
+                            if high_corr_pairs:
+                                corr_note = (f"⚠️ 독립변수 간 상관이 높은 쌍이 있습니다: {', '.join(high_corr_pairs)} "
+                                             f"— 아래 계수표의 VIF와 함께 다중공선성을 확인해보세요.")
+                            st.caption(f"↳ {corr_note}")
 
                             st.markdown("##### 📋 모델 요약")
                             r_val = np.sqrt(reg_model.rsquared)
