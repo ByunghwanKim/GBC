@@ -814,6 +814,15 @@ elif input_pw:
 # 메인 화면 구성
 st.title("📚 GBC 연구 논문 DB 관리 시스템")
 
+# [수정] 예열(warm-up) 트리거를 tab2 안쪽이 아니라 여기(탭 생성 전)로 옮김.
+# 이전 위치에서는 tab0/1의 위젯은 예열 '전'에, tab2/3/4의 위젯은 예열 '후'에
+# 렌더링되는 불균형이 있었음. 여기로 옮기면 모든 탭의 모든 위젯이
+# 예외 없이 예열 완료 이후에만 첫 렌더링되어, 파일 업로더가 여러 탭에
+# 흩어져 있어도 동일하게 보호된다.
+if not st.session_state.get('_app_warmed_up', False):
+    st.session_state['_app_warmed_up'] = True
+    st.rerun()
+
 tab_names = ["🔍 연구 논문 DB 검색", "🌐 Semantic Scholar 검색", "🚀 논문 파일 업로드", "📊 통계 분석 (파일럿)"]
 if is_admin:
     tab_names.append("⚙️ 관리자 전용 관리 (DB/다운로드)")
@@ -1100,15 +1109,6 @@ with tabs[2]:
     st.subheader("🚀 논문 파일을 업로드 하세요.")
     st.caption("📂 파일을 올리면 동일 논문 유무를 자동으로 판단하여, 더 충실한 내용으로 스마트 업데이트되거나 신규 등록됩니다.")
 
-    # [추가] 파일 업로더가 탭에 처음 마운트된 직후 바로 파일을 선택하면
-    # 프론트엔드 이벤트 연결이 아직 안 끝난 상태라 선택이 인식되지 않는 문제를 우회.
-    # (버튼을 한 번 눌러서 화면을 한 번 더 재실행하면 정상 작동하는 게 확인됨 ->
-    #  같은 효과를 사용자가 수동으로 안 해도 되도록, 탭 진입 직후 자동으로
-    #  '조용한 재실행'을 한 번 미리 트리거해서 예열해 둔다.)
-    if not st.session_state.get('_upload_tab_warmed_up', False):
-        st.session_state['_upload_tab_warmed_up'] = True
-        st.rerun()
-
     if 'uploader_key_counter' not in st.session_state:
         st.session_state['uploader_key_counter'] = 0
 
@@ -1369,7 +1369,15 @@ with tabs[3]:
         key="stat_data_uploader"
     )
 
-    if stat_file:
+    # [추가] 파일을 고르는 즉시 자동으로 읽어들이지 않고, 버튼을 눌러야
+    # 실제 분석 화면이 시작되도록 함.
+    if stat_file is not None:
+        if st.button("▶️ 분석 시작 (파일 불러오기)", type="primary", key="btn_start_stat_analysis"):
+            st.session_state['stat_analysis_started'] = True
+    else:
+        st.session_state['stat_analysis_started'] = False
+
+    if stat_file is not None and st.session_state.get('stat_analysis_started'):
         try:
             if stat_file.name.lower().endswith('.csv'):
                 stat_df = pd.read_csv(stat_file)
@@ -1804,8 +1812,10 @@ with tabs[3]:
                         )
         elif stat_df is not None:
             st.warning("업로드한 파일에 데이터가 없습니다.")
+    elif stat_file is not None:
+        st.info("파일이 선택되었습니다. 위의 '▶️ 분석 시작' 버튼을 눌러주세요.")
     else:
-        st.info("CSV 또는 엑셀 파일을 업로드하면 t-검정 · 분산분석 · 회귀분석을 바로 실행할 수 있습니다.")
+        st.info("CSV 또는 엑셀 파일을 업로드하면 t-검정 · 분산분석 · 회귀분석을 실행할 수 있습니다.")
 
 # [탭 4] 관리자 전용 관리
 if is_admin:
