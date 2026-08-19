@@ -11,7 +11,7 @@ import requests
 import datetime
 import time
 import google.generativeai as genai
-from google.api_core.exceptions import ResourceExhausted
+from google.api_core.exceptions import ResourceExhausted, NotFound
 from pypdf import PdfReader
 from github import Github
 from github.GithubException import UnknownObjectException
@@ -182,7 +182,9 @@ genai.configure(api_key=GEMINI_API_KEY)
 # [추가] 무료 티어 할당량이 모델마다 다르므로, 할당량 초과 시 순서대로 넘어갈 수 있게
 # 우선순위 리스트를 별도로 보관 (get_available_gemini_model은 이 중 '가장 좋은' 1개만
 # 선택하지만, 할당량 소진 시 generate_content_with_fallback()이 이 리스트를 순회한다)
-GEMINI_MODEL_PRIORITY = ['gemini-3.6-flash', 'gemini-3.7-flash', 'gemini-3.5-flash', 'gemini-2.5-flash', 'gemini-2.0-flash']
+# [수정] gemini-2.5-flash, gemini-2.0-flash는 이미 단종되어 404를 반환하므로 목록에서 제거.
+# 현재 유효한 모델만 남김.
+GEMINI_MODEL_PRIORITY = ['gemini-3.6-flash', 'gemini-3.7-flash', 'gemini-3.5-flash', 'gemini-3.5-flash-lite']
 
 @st.cache_resource
 def get_available_gemini_model():
@@ -208,7 +210,7 @@ def get_available_gemini_model():
     except Exception:
         pass
     return genai.GenerativeModel(
-        model_name='gemini-2.5-flash',
+        model_name='gemini-3.6-flash',
         generation_config={"temperature": 0.1, "response_mime_type": "application/json"}
     )
 
@@ -230,36 +232,46 @@ def _get_fallback_model_pool():
     return pool
 
 def generate_content_with_fallback(prompt, max_retries_per_model=2):
-    """[추가] Gemini 할당량 초과(ResourceExhausted, 429) 대응.
-    1) 같은 모델로 짧게 재시도 (일시적 분당 한도 초과일 수 있으므로)
-    2) 그래도 안 되면(일일 한도 소진 등) 우선순위상 다음 모델로 자동 전환
-    3) 모든 모델이 다 막히면 마지막 에러를 그대로 올려서 호출부가 사용자에게 알리게 함
+    """[수정] Gemini 할당량 초과(ResourceExhausted, 429)뿐 아니라
+    모델 단종(NotFound, 404)도 함께 대응.
+    1) 할당량 초과(일시적/분당) -> 같은 모델로 짧게 재시도
+    2) 할당량 초과(일일 한도 소진) -> 우선순위상 다음 모델로 자동 전환
+    3) 모델 자체가 단종(404 NotFound) -> 재시도해도 절대 성공할 수 없으므로
+       즉시 다음 모델로 넘어감 (이 부분이 빠져 있어서 단종 모델을 만나면
+       폴백 없이 바로 에러가 올라갔던 문제를 수정)
+    4) 모든 모델이 다 막히면 마지막 에러를 그대로 올려서 호출부가 사용자에게 알리게 함
     """
     pool = _get_fallback_model_pool()
     ordered_models = [model] + [m for name, m in pool.items() if m is not model]
 
     last_error = None
     for candidate in ordered_models:
-        for attempt in range(max_retries_per_model):
-            try:
-                return candidate.generate_content(prompt)
-            except ResourceExhausted as e:
-                last_error = e
-                msg = str(e)
-                # 메시지에 담긴 "Please retry in X.Xs" 힌트를 읽어서 그만큼만 대기 (없으면 기본 backoff)
-                wait_s = 5.0 * (attempt + 1)
-                if "retry in" in msg:
-                    try:
-                        wait_s = float(msg.split("retry in")[1].split("s")[0].strip())
-                    except Exception:
-                        pass
-                # 하루 단위 할당량(PerDay)까지 소진된 경우는 같은 모델을 더 기다려봐야 소용없으므로
-                # 바로 다음 모델로 넘어감. 분당/짧은 한도로 보이면 안내된 시간만큼 대기 후 재시도.
-                if "PerDay" in msg:
-                    break
-                time.sleep(min(wait_s, 15.0))
-                continue
-            except Exception as e:
+        try:
+            for attempt in range(max_retries_per_model):
+                try:
+                    return candidate.generate_content(prompt)
+                except ResourceExhausted as e:
+                    last_error = e
+                    msg = str(e)
+                    # 메시지에 담긴 "Please retry in X.Xs" 힌트를 읽어서 그만큼만 대기 (없으면 기본 backoff)
+                    wait_s = 5.0 * (attempt + 1)
+                    if "retry in" in msg:
+                        try:
+                            wait_s = float(msg.split("retry in")[1].split("s")[0].strip())
+                        except Exception:
+                            pass
+                    # 하루 단위 할당량(PerDay)까지 소진된 경우는 같은 모델을 더 기다려봐야 소용없으므로
+                    # 바로 다음 모델로 넘어감. 분당/짧은 한도로 보이면 안내된 시간만큼 대기 후 재시도.
+                    if "PerDay" in msg:
+                        break
+                    time.sleep(min(wait_s, 15.0))
+                    continue
+        except NotFound as e:
+            # [추가] 모델이 단종되어 404가 난 경우: 이 모델은 재시도 자체가 무의미하므로
+            # 즉시 다음 우선순위 모델로 넘어간다.
+            last_error = e
+            continue
+        except Exception as e:
                 # 할당량 문제가 아닌 다른 오류는 폴백해도 소용없으므로 즉시 올림
                 raise
     # 모든 모델/재시도가 실패
@@ -355,6 +367,13 @@ def safe(text):
     return html.escape(str(text))
 
 def parse_gemini_json(raw_text):
+    """Gemini 응답을 JSON으로 파싱. 두 종류의 흔한 문제를 방어한다:
+    1) 마크다운 코드펜스(```json ... ```)로 감싸서 응답하는 경우 -> 벗겨냄
+    2) 문자열 값 안에 실제 줄바꿈 문자가 이스케이프(\\n) 없이 그대로 들어간 경우
+       -> "Expecting ',' delimiter" / "Invalid control character" 에러로 이어짐.
+          survey_items, hypotheses처럼 여러 줄 형식을 요청한 필드에서 특히 자주 발생.
+          json.loads(text, strict=False)로 재시도하면 이런 원문 그대로의 제어문자를
+          허용해서 파싱에 성공한다."""
     text = raw_text.strip()
 
     if text.startswith("```"):
@@ -363,13 +382,19 @@ def parse_gemini_json(raw_text):
             text = text[4:]
         text = text.strip()
 
+    def _try_loads(s):
+        try:
+            return json.loads(s)
+        except json.JSONDecodeError:
+            return json.loads(s, strict=False)
+
     try:
-        return json.loads(text)
+        return _try_loads(text)
     except json.JSONDecodeError:
         start = text.find("{")
         end = text.rfind("}")
         if start != -1 and end != -1 and end > start:
-            return json.loads(text[start:end + 1])
+            return _try_loads(text[start:end + 1])
         raise
 
 def scroll_to_results():
@@ -1123,6 +1148,11 @@ with tabs[2]:
                             # [추가] 모든 폴백 모델까지 다 막힌 경우의 사용자 안내
                             st.error(f"'{file.name}' 분석 실패: Gemini API 할당량이 모두 소진되었습니다. "
                                      f"Google AI Studio에서 결제(빌링)를 활성화하시거나, 잠시(보통 다음날) 후 다시 시도해주세요.")
+                        except NotFound:
+                            # [추가] 폴백 목록의 모든 모델이 단종된 경우의 사용자 안내
+                            st.error(f"'{file.name}' 분석 실패: 사용 가능한 Gemini 모델을 찾지 못했습니다 "
+                                     f"(등록된 모델들이 모두 단종되었을 수 있습니다). GEMINI_MODEL_PRIORITY 목록을 "
+                                     f"최신 모델명으로 업데이트해야 할 수 있습니다.")
                         except Exception as e:
                             st.error(f"'{file.name}' 분석 중 오류: {str(e)}")
 
