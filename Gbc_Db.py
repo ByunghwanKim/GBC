@@ -966,6 +966,15 @@ with tabs[2]:
     st.subheader("🚀 논문 파일을 업로드 하세요.")
     st.caption("📂 파일을 올리면 동일 논문 유무를 자동으로 판단하여, 더 충실한 내용으로 스마트 업데이트되거나 신규 등록됩니다.")
 
+    # [추가] 파일 업로더가 탭에 처음 마운트된 직후 바로 파일을 선택하면
+    # 프론트엔드 이벤트 연결이 아직 안 끝난 상태라 선택이 인식되지 않는 문제를 우회.
+    # (버튼을 한 번 눌러서 화면을 한 번 더 재실행하면 정상 작동하는 게 확인됨 ->
+    #  같은 효과를 사용자가 수동으로 안 해도 되도록, 탭 진입 직후 자동으로
+    #  '조용한 재실행'을 한 번 미리 트리거해서 예열해 둔다.)
+    if not st.session_state.get('_upload_tab_warmed_up', False):
+        st.session_state['_upload_tab_warmed_up'] = True
+        st.rerun()
+
     if 'uploader_key_counter' not in st.session_state:
         st.session_state['uploader_key_counter'] = 0
 
