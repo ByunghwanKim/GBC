@@ -930,9 +930,6 @@ with tabs[2]:
     if 'uploader_key_counter' not in st.session_state:
         st.session_state['uploader_key_counter'] = 0
 
-    st.caption(f"🔧 업로더 인스턴스 #{st.session_state['uploader_key_counter']} "
-               f"(이 번호가 업로드마다 올라가는데도 파일이 안 지워지면 알려주세요)")
-
     if st.session_state.get('last_upload_summary'):
         summary = st.session_state.pop('last_upload_summary')
         st.success(summary['message'])
@@ -1155,7 +1152,12 @@ with tabs[2]:
                         'logs': processed_logs,
                         'new_entries': new_entries,
                     }
-                    st.session_state['uploader_key_counter'] += 1
+                    # [수정] 성공 직후 자동으로 업로더 key를 바꿔 목록을 비우던 로직을 제거.
+                    # 이 자동 리마운트가 모바일(안드로이드 Chrome)에서 바로 이어지는 다중 파일
+                    # 선택과 타이밍이 겹치면서, 새로 고른 파일이 아예 서버로 안 올라가는
+                    # (파일 처리 버튼을 눌러도 "업로드할 파일을 선택해주세요"가 뜨는) 문제를 일으켰음.
+                    # 목록이 안 지워지는 건 불편하지만, 파일 선택 자체가 안 되는 것보다는 낫기 때문에
+                    # 자동 초기화는 끄고 아래의 수동 "선택 파일 목록 초기화" 버튼만 남긴다.
                     st.rerun()
                 else:
                     status.update(label="추출/병합된 데이터 없음", state="error")
